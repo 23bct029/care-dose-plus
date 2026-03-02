@@ -15,7 +15,7 @@ import {
   Pill, Bell, Clock, Calendar, Heart, 
   User, Phone, AlertCircle, CheckCircle,
   Volume2, Mic, LogOut, MessageSquare, Activity,
-  XCircle, ChevronRight, Clock as TimerIcon
+  XCircle, ChevronRight, UserPlus // Add UserPlus here if used
 } from 'lucide-react';
 
 const ElderlyApp = () => {
@@ -635,6 +635,17 @@ const ElderlyApp = () => {
                 ) : null}
                 <Mic className={`h-5 w-5 ${isListening ? 'text-green-600' : ''}`} />
               </Button>
+              
+                <Button 
+                  variant="ghost" 
+                  size="icon" 
+                  onClick={() => navigate('/connections')}
+                  className="relative"
+                  title="Manage Connections"
+                >
+                  <UserPlus className="h-5 w-5" />
+                </Button>
+
               <Button 
                 variant="destructive" 
                 size="icon" 

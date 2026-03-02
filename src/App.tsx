@@ -13,6 +13,7 @@ import AdminApp from '@/pages/AdminApp';
 import Schedule from '@/pages/Schedule';
 import Medicines from '@/pages/Medicines';
 import AddMedicine from '@/pages/AddMedicine';
+import AcceptInvite from '@/pages/AcceptInvite'; // Add this import
 
 function App() {
   useEffect(() => {
@@ -33,6 +34,7 @@ function App() {
           <Route path="/" element={<Navigate to="/login" replace />} />
           <Route path="/login" element={<Login />} />
           <Route path="/signup" element={<Signup />} />
+          <Route path="/accept-invite" element={<AcceptInvite />} /> {/* Add this route */}
           
           <Route path="/elderly" element={
             <ProtectedRoute allowedRoles={['elderly']}>

@@ -582,7 +582,7 @@ const DoctorApp = () => {
         </div>
 
         {/* Quick Actions */}
-        <div className="grid grid-cols-4 gap-3">
+        <div className="grid grid-cols-3 gap-3">
           <Button 
             className="h-16 flex flex-col items-center justify-center hover:bg-purple-100 transition-colors" 
             variant="outline"
@@ -591,6 +591,17 @@ const DoctorApp = () => {
             <UserPlus className="h-5 w-5 mb-1" />
             <span className="text-xs">New Patient</span>
           </Button>
+
+          <Button 
+            variant="ghost" 
+            size="icon" 
+            onClick={() => navigate('/connections')}
+            className="relative"
+            title="Manage Connections"
+          >
+            <UserPlus className="h-5 w-5" />
+          </Button>
+
           <Button 
             className="h-16 flex flex-col items-center justify-center hover:bg-blue-100 transition-colors" 
             variant="outline"

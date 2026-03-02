@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getCurrentUser, getUserProfile, logOut } from '@/lib/firebase-auth';
-import { db } from '@/lib/firebase';
+import { db, auth } from '@/lib/firebase';
 import { collection, query, where, getDocs, doc, getDoc, addDoc, updateDoc, deleteDoc } from 'firebase/firestore';
+import { sendSignInLinkToEmail } from 'firebase/auth';
 import { logger } from '@/lib/logger';
 import { sendBrowserNotification } from '@/lib/notifications';
 import { Button } from '@/components/ui/button';
@@ -13,86 +14,13 @@ import { Progress } from '@/components/ui/progress';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { 
   Users, Heart, Pill, Calendar, Bell, 
   AlertCircle, CheckCircle, XCircle, Clock,
-  Phone, MessageSquare, Plus, Search, UserPlus,
+  Phone, MessageSquare, Search, UserPlus,
   Activity, TrendingUp, Download, LogOut,
-  Mail, Send, Link, QrCode, UserCheck,
-  Stethoscope, Shield, MailPlus, Eye, Info
+  Mail, Send, Info, Eye, MailPlus
 } from 'lucide-react';
-
-import { getAuth, sendSignInLinkToEmail } from 'firebase/auth';
-
-// In your component, update handleSendInvite:
-const handleSendInvite = async () => {
-  if (!inviteEmail.trim()) {
-    setInviteError('Please enter an email address');
-    return;
-  }
-
-  setInviteError('');
-  setInviteSuccess('');
-  setLoading(true);
-
-  try {
-    const auth = getAuth();
-    const actionCodeSettings = {
-      url: `${window.location.origin}/accept-invite?email=${encodeURIComponent(inviteEmail)}&role=${inviteRole}`,
-      handleCodeInApp: true,
-      iOS: {
-        bundleId: 'com.caredose.app'
-      },
-      android: {
-        packageName: 'com.caredose.app',
-        installApp: true,
-        minimumVersion: '12'
-      },
-      dynamicLinkDomain: 'caredose.page.link'
-    };
-
-    // Send sign-in link to email
-    await sendSignInLinkToEmail(auth, inviteEmail, actionCodeSettings);
-    
-    // Save the email locally to complete sign-in later
-    window.localStorage.setItem('emailForSignIn', inviteEmail);
-    
-    // Create invite record in Firestore
-    const inviteToken = Math.random().toString(36).substring(2, 15);
-    const invitesRef = collection(db, 'invites');
-    await addDoc(invitesRef, {
-      fromId: user.uid,
-      fromName: profile?.name,
-      fromEmail: profile?.email,
-      fromRole: profile?.role,
-      toEmail: inviteEmail,
-      toRole: inviteRole,
-      token: inviteToken,
-      status: 'pending',
-      createdAt: new Date().toISOString(),
-      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()
-    });
-
-    setInviteSuccess(`
-      ✅ Invitation sent to ${inviteEmail}!
-      
-      They will receive an email with a link to create their account.
-      When they sign up, they'll be automatically connected to you.
-    `);
-
-    setInviteEmail('');
-    setInviteMessage('');
-
-  } catch (error: any) {
-    console.error('Error sending invite:', error);
-    setInviteError('Failed to send invitation: ' + error.message);
-  } finally {
-    setLoading(false);
-  }
-};
-// ... rest of the component code remains exactly the same ...
-// (Keep all the existing code from line 40 onwards)
 
 const CaregiverApp = () => {
   const [user, setUser] = useState<any>(null);
@@ -151,21 +79,24 @@ const CaregiverApp = () => {
 
       await logger.logWithUser(currentUser.uid, currentUser.email, 'info', 'Data loading started', { page: 'CaregiverDashboard' });
 
-      // Get all elderly patients for this caregiver from Firestore
-      const relationshipsRef = collection(db, 'connections');
-      const relationshipsQuery = query(
-        relationshipsRef, 
+      // Get all connections for this caregiver
+      const connectionsRef = collection(db, 'connections');
+      const connectionsQuery = query(
+        connectionsRef, 
         where('caregiverId', '==', currentUser.uid),
         where('status', '==', 'active')
       );
-      const relationshipsSnap = await getDocs(relationshipsQuery);
+      const connectionsSnap = await getDocs(connectionsQuery);
       
       const patientsData = await Promise.all(
-        relationshipsSnap.docs.map(async (relDoc) => {
-          const relData = relDoc.data();
+        connectionsSnap.docs.map(async (connDoc) => {
+          const connData = connDoc.data();
           
-          // Get patient profile
-          const patientRef = doc(db, 'users', relData.elderlyId || relData.patientId);
+          // Get patient profile (could be elderly or patient)
+          const patientId = connData.elderlyId || connData.patientId;
+          if (!patientId) return null;
+          
+          const patientRef = doc(db, 'users', patientId);
           const patientSnap = await getDoc(patientRef);
           const patientData = patientSnap.data();
           
@@ -173,7 +104,7 @@ const CaregiverApp = () => {
 
           // Get today's medicines for this patient
           const medicinesRef = collection(db, 'medicines');
-          const medicinesQuery = query(medicinesRef, where('userId', '==', relData.elderlyId || relData.patientId));
+          const medicinesQuery = query(medicinesRef, where('userId', '==', patientId));
           const medicinesSnap = await getDocs(medicinesQuery);
           
           const medicines: any[] = [];
@@ -186,7 +117,7 @@ const CaregiverApp = () => {
           const trackingRef = collection(db, 'tracking');
           const trackingQuery = query(
             trackingRef, 
-            where('userId', '==', relData.elderlyId || relData.patientId),
+            where('userId', '==', patientId),
             where('date', '==', today)
           );
           const trackingSnap = await getDocs(trackingQuery);
@@ -221,7 +152,7 @@ const CaregiverApp = () => {
             .sort((a, b) => a.time.localeCompare(b.time))[0];
 
           return {
-            id: relData.elderlyId || relData.patientId,
+            id: patientId,
             ...patientData,
             medicines,
             tracking,
@@ -284,7 +215,7 @@ const CaregiverApp = () => {
     }
   };
 
-  // Send invitation link via email
+  // Send invitation via Firebase Email Link
   const handleSendInvite = async () => {
     if (!inviteEmail.trim()) {
       setInviteError('Please enter an email address');
@@ -296,10 +227,20 @@ const CaregiverApp = () => {
     setLoading(true);
 
     try {
-      // Generate unique invite token
-      const inviteToken = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+      // Configure email link
+      const actionCodeSettings = {
+        url: `${window.location.origin}/accept-invite?email=${encodeURIComponent(inviteEmail)}&role=${inviteRole}`,
+        handleCodeInApp: true,
+      };
+
+      // Send sign-in link to email
+      await sendSignInLinkToEmail(auth, inviteEmail, actionCodeSettings);
       
-      // Create invite in database
+      // Save the email locally to complete sign-in later
+      window.localStorage.setItem('emailForSignIn', inviteEmail);
+      
+      // Create invite record in Firestore
+      const inviteToken = Math.random().toString(36).substring(2, 15);
       const invitesRef = collection(db, 'invites');
       await addDoc(invitesRef, {
         fromId: user.uid,
@@ -310,22 +251,16 @@ const CaregiverApp = () => {
         toRole: inviteRole,
         token: inviteToken,
         status: 'pending',
+        message: inviteMessage,
         createdAt: new Date().toISOString(),
-        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString() // 7 days
+        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()
       });
 
-      // Create invitation link
-      const inviteLink = `${window.location.origin}/accept-invite?token=${inviteToken}&email=${encodeURIComponent(inviteEmail)}`;
-      
-      // In a real app, you would send an email here
-      // For demo, we'll show the link
       setInviteSuccess(`
         ✅ Invitation sent to ${inviteEmail}!
         
-        They can sign up using this link:
-        ${inviteLink}
-        
-        (In production, this would be emailed automatically)
+        They will receive an email with a secure link to create their account.
+        When they sign up, they'll be automatically connected to you.
       `);
 
       // Log the action
@@ -497,7 +432,7 @@ const CaregiverApp = () => {
           </Card>
         )}
 
-        {/* Stats Cards - Beautiful Gradient Cards */}
+        {/* Stats Cards */}
         <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
           <Card className="bg-gradient-to-br from-blue-600 to-blue-700 text-white shadow-lg">
             <CardContent className="p-5">
@@ -797,7 +732,7 @@ const CaregiverApp = () => {
               <p className="text-sm text-blue-800 flex items-start gap-2">
                 <Info className="h-4 w-4 mt-0.5 flex-shrink-0" />
                 <span>
-                  An invitation link will be sent to the email address. The recipient can click the link to sign up and will be automatically connected to you.
+                  An invitation email will be sent with a secure link. The recipient can click the link to create their account and will be automatically connected to you.
                 </span>
               </p>
             </div>
