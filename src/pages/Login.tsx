@@ -32,38 +32,64 @@ const Login = () => {
     }
 
     try {
-      const user = await logIn(trimmedEmail, trimmedPassword);
+      // Attempt login
+      const result = await logIn(trimmedEmail, trimmedPassword);
       
+      if (result.error) {
+        setError(result.error);
+        await logger.warning('Failed login attempt', { 
+          email: trimmedEmail, 
+          error: result.error 
+        });
+        setLoading(false);
+        return;
+      }
+
+      if (!result.user) {
+        setError('Login failed - no user returned');
+        setLoading(false);
+        return;
+      }
+
       // Log successful login
-      await logger.info('User logged in', { email: trimmedEmail });
-      
-      // Get user role from Firestore
-      const userProfile = await getUserProfile(user.uid);
+      await logger.info('User logged in', { 
+        email: trimmedEmail,
+        userId: result.user.uid 
+      });
+
+      // Get user profile from Firestore
+      const userProfile = await getUserProfile(result.user.uid);
       console.log('User profile:', userProfile);
       
+      if (!userProfile) {
+        setError('User profile not found');
+        setLoading(false);
+        return;
+      }
+
       // Log profile retrieval
       await logger.info('User profile retrieved', { 
-        userId: user.uid,
-        role: userProfile?.role 
+        userId: result.user.uid,
+        role: userProfile.role 
       });
       
       // Redirect based on role
-      if (userProfile?.role === 'caregiver') {
+      if (userProfile.role === 'caregiver') {
         navigate('/caregiver');
-      } else if (userProfile?.role === 'doctor') {
+      } else if (userProfile.role === 'doctor') {
         navigate('/doctor');
-      } else if (userProfile?.role === 'admin') {
+      } else if (userProfile.role === 'admin') {
         navigate('/admin');
       } else {
         navigate('/elderly'); // Default for elderly
       }
     } catch (err: any) {
-      // Log failed login attempt
-      await logger.warning('Failed login attempt', { 
+      // Log unexpected error
+      await logger.error('Unexpected login error', { 
         email: trimmedEmail, 
         error: err.message 
       });
-      setError(err.message || 'Invalid email or password');
+      setError('An unexpected error occurred. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -84,6 +110,7 @@ const Login = () => {
         
         <CardContent>
           <form onSubmit={handleLogin} className="space-y-4">
+            {/* Email Field */}
             <div className="space-y-2">
               <Label htmlFor="email">Email</Label>
               <div className="relative">
@@ -92,7 +119,7 @@ const Login = () => {
                   id="email"
                   type="email"
                   value={email}
-                  onChange={(e) => setEmail(e.target.value)}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEmail(e.target.value)}
                   placeholder="Enter your email"
                   required
                   className="pl-10 border-2 focus:border-blue-500"
@@ -101,6 +128,7 @@ const Login = () => {
               </div>
             </div>
             
+            {/* Password Field */}
             <div className="space-y-2">
               <Label htmlFor="password">Password</Label>
               <div className="relative">
@@ -109,7 +137,7 @@ const Login = () => {
                   id="password"
                   type={showPassword ? "text" : "password"}
                   value={password}
-                  onChange={(e) => setPassword(e.target.value)}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setPassword(e.target.value)}
                   placeholder="Enter your password"
                   required
                   className="pl-10 pr-10 border-2 focus:border-blue-500"
@@ -125,11 +153,13 @@ const Login = () => {
               </div>
             </div>
 
+            {/* Submit Button */}
             <Button type="submit" className="w-full" disabled={loading}>
               {loading ? 'Signing in...' : 'Sign In'}
             </Button>
           </form>
 
+          {/* Error Alert */}
           {error && (
             <Alert variant="destructive" className="mt-4">
               <AlertCircle className="h-4 w-4" />
@@ -137,6 +167,7 @@ const Login = () => {
             </Alert>
           )}
 
+          {/* Sign Up Link */}
           <div className="mt-6 text-center">
             <p className="text-gray-600">
               Don't have an account?{' '}
@@ -145,6 +176,19 @@ const Login = () => {
               </Link>
             </p>
           </div>
+
+          {/* Test Accounts (for development) */}
+          {process.env.NODE_ENV === 'development' && (
+            <div className="mt-6 p-4 bg-gray-50 rounded-lg border border-gray-200">
+              <p className="text-sm font-semibold text-gray-700 mb-2">Test Accounts:</p>
+              <div className="space-y-1 text-xs text-gray-600">
+                <p>Admin: admin@caredose.com / Admin@123</p>
+                <p>Elderly: elderly@caredose.com / Elderly@123</p>
+                <p>Caregiver: caregiver@caredose.com / Caregiver@123</p>
+                <p>Doctor: doctor@caredose.com / Doctor@123</p>
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>

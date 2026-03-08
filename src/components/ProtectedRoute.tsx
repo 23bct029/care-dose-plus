@@ -1,7 +1,6 @@
-// src/components/ProtectedRoute.tsx
 import { useEffect, useState } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
-import { getCurrentUserAsync, getUserProfile } from '@/lib/firebase-auth';
+import { useNavigate } from 'react-router-dom';
+import { getCurrentUser, getUserProfile } from '@/lib/firebase-auth';
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
@@ -12,72 +11,49 @@ const ProtectedRoute = ({ children, allowedRoles }: ProtectedRouteProps) => {
   const [loading, setLoading] = useState(true);
   const [authorized, setAuthorized] = useState(false);
   const navigate = useNavigate();
-  const location = useLocation();
 
   useEffect(() => {
-    let isMounted = true;
-
     const checkAuth = async () => {
       try {
-        const user = await getCurrentUserAsync();
+        // Fix: Changed from getCurrentUserAsync to getCurrentUser
+        const user = await getCurrentUser();
         
-        if (!isMounted) return;
-
         if (!user) {
           console.log('No user found, redirecting to login');
-          navigate('/login', { replace: true, state: { from: location.pathname } });
+          navigate('/login', { replace: true });
           return;
         }
 
         const profile = await getUserProfile(user.uid);
         
-        if (!isMounted) return;
-
         if (!profile) {
           console.log('No profile found, redirecting to login');
           navigate('/login', { replace: true });
           return;
         }
 
-        // Check if user's role is allowed for this route
         if (!allowedRoles.includes(profile.role)) {
-          console.log(`Role ${profile.role} not allowed for page ${location.pathname}`);
-          
+          console.log(`Role ${profile.role} not allowed`);
           // Redirect to appropriate dashboard based on role
-          const redirectPath = getDashboardForRole(profile.role);
-          navigate(redirectPath, { replace: true });
+          if (profile.role === 'elderly') navigate('/elderly', { replace: true });
+          else if (profile.role === 'caregiver') navigate('/caregiver', { replace: true });
+          else if (profile.role === 'doctor') navigate('/doctor', { replace: true });
+          else if (profile.role === 'admin') navigate('/admin', { replace: true });
+          else navigate('/login', { replace: true });
           return;
         }
 
         setAuthorized(true);
       } catch (error) {
         console.error('Auth check error:', error);
-        if (isMounted) {
-          navigate('/login', { replace: true });
-        }
+        navigate('/login', { replace: true });
       } finally {
-        if (isMounted) {
-          setLoading(false);
-        }
+        setLoading(false);
       }
     };
 
     checkAuth();
-
-    return () => {
-      isMounted = false;
-    };
-  }, [navigate, location.pathname, allowedRoles]);
-
-  const getDashboardForRole = (role: string): string => {
-    switch(role) {
-      case 'elderly': return '/elderly';
-      case 'caregiver': return '/caregiver';
-      case 'doctor': return '/doctor';
-      case 'admin': return '/admin';
-      default: return '/login';
-    }
-  };
+  }, [navigate, allowedRoles]);
 
   if (loading) {
     return (

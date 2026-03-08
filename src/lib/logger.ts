@@ -1,4 +1,4 @@
-// src/lib/logger.ts
+// src/lib/logger.ts - COMPLETE FIXED
 import { db } from './firebase';
 import { collection, addDoc, query, where, orderBy, getDocs, limit } from 'firebase/firestore';
 
@@ -6,29 +6,52 @@ export type LogLevel = 'info' | 'warning' | 'error' | 'debug';
 
 export interface LogEntry {
   id?: string;
-  userId?: string;
-  userEmail?: string;
+  userId?: string | null;
+  userEmail?: string | null;
   level: LogLevel;
   action: string;
   details?: any;
-  timestamp: any;
+  timestamp: string;
   page?: string;
   browser?: string;
   os?: string;
-  ip?: string;
 }
+
+// Helper function to recursively remove undefined values
+const sanitizeData = (obj: any): any => {
+  if (obj === null || obj === undefined) {
+    return null;
+  }
+  
+  if (Array.isArray(obj)) {
+    return obj.map(item => sanitizeData(item));
+  }
+  
+  if (typeof obj === 'object') {
+    const sanitized: any = {};
+    for (const key in obj) {
+      if (obj.hasOwnProperty(key)) {
+        const value = obj[key];
+        if (value !== undefined) {
+          sanitized[key] = sanitizeData(value);
+        }
+      }
+    }
+    return sanitized;
+  }
+  
+  return obj;
+};
 
 class Logger {
   private enabled: boolean = true;
   private consoleEnabled: boolean = true;
   private logCache: Map<string, LogEntry[]> = new Map();
   private cacheTimeout: number = 5 * 60 * 1000; // 5 minutes
+  private isDevelopment: boolean = process.env.NODE_ENV === 'development';
 
   constructor() {
-    // Log browser info on init
     this.logBrowserInfo();
-    
-    // Set up periodic cache cleanup
     setInterval(() => this.cleanCache(), this.cacheTimeout);
   }
 
@@ -59,34 +82,33 @@ class Logger {
     await this.info('Browser info', { browser, os }, true);
   }
 
-  private cleanCache() {
-    const now = Date.now();
-    for (const [key, value] of this.logCache.entries()) {
-      // Clean old cache entries (implement if needed)
-    }
-  }
+  private cleanCache() {}
 
   async log(level: LogLevel, action: string, details?: any, skipFirestore: boolean = false) {
     const timestamp = new Date().toISOString();
     const { browser, os } = this.getBrowserInfo();
     const page = window.location.pathname;
 
-    // Console logging
+    const sanitizedDetails = sanitizeData(details);
+
     if (this.consoleEnabled) {
       const logMethod = level === 'error' ? console.error : 
                        level === 'warning' ? console.warn : 
                        console.log;
-      logMethod(`[${level.toUpperCase()}] ${action}`, details || '');
+      logMethod(`[${level.toUpperCase()}] ${action}`, sanitizedDetails || '');
     }
 
-    // Firestore logging
+    if (this.isDevelopment && !skipFirestore) {
+      return null;
+    }
+
     if (this.enabled && !skipFirestore) {
       try {
         const logsRef = collection(db, 'system_logs');
         const logEntry = {
           level,
           action,
-          details: details || null,
+          details: sanitizedDetails,
           timestamp,
           browser,
           os,
@@ -97,7 +119,6 @@ class Logger {
         
         const docRef = await addDoc(logsRef, logEntry);
         
-        // Cache the log
         const logWithId = { id: docRef.id, ...logEntry };
         this.addToCache('all', logWithId);
         
@@ -115,7 +136,7 @@ class Logger {
     }
     const logs = this.logCache.get(key)!;
     logs.unshift(log);
-    if (logs.length > 100) logs.pop(); // Keep only last 100 logs
+    if (logs.length > 100) logs.pop();
   }
 
   async info(action: string, details?: any, skipFirestore?: boolean) {
@@ -131,16 +152,15 @@ class Logger {
   }
 
   async debug(action: string, details?: any, skipFirestore?: boolean) {
-    if (process.env.NODE_ENV === 'development') {
+    if (this.isDevelopment) {
       return this.log('debug', action, details, skipFirestore);
     }
     return null;
   }
 
-  // Log with user context
   async logWithUser(
-    userId: string, 
-    userEmail: string | null, 
+    userId: string | null | undefined, 
+    userEmail: string | null | undefined, 
     level: LogLevel, 
     action: string, 
     details?: any,
@@ -150,21 +170,25 @@ class Logger {
     const { browser, os } = this.getBrowserInfo();
     const page = window.location.pathname;
 
-    // Console logging
+    const sanitizedDetails = sanitizeData(details);
+
     if (this.consoleEnabled) {
-      console.log(`[${level.toUpperCase()}] [${userEmail}] ${action}`, details || '');
+      console.log(`[${level.toUpperCase()}] [${userEmail || 'unknown'}] ${action}`, sanitizedDetails || '');
     }
 
-    // Firestore logging
+    if (this.isDevelopment && !skipFirestore) {
+      return null;
+    }
+
     if (this.enabled && !skipFirestore) {
       try {
         const logsRef = collection(db, 'system_logs');
         const logEntry = {
-          userId,
-          userEmail,
+          userId: userId || null,
+          userEmail: userEmail || null,
           level,
           action,
-          details: details || null,
+          details: sanitizedDetails,
           timestamp,
           browser,
           os,
@@ -173,10 +197,11 @@ class Logger {
         
         const docRef = await addDoc(logsRef, logEntry);
         
-        // Cache the log
         const logWithId = { id: docRef.id, ...logEntry };
         this.addToCache('all', logWithId);
-        this.addToCache(`user_${userId}`, logWithId);
+        if (userId) {
+          this.addToCache(`user_${userId}`, logWithId);
+        }
         
         return logWithId;
       } catch (error) {
@@ -186,7 +211,6 @@ class Logger {
     return null;
   }
 
-  // Get logs for a specific user
   async getUserLogs(
     userId: string, 
     options?: {
@@ -205,7 +229,6 @@ class Logger {
         orderBy('timestamp', 'desc')
       );
 
-      // Apply filters
       if (options?.level) {
         q = query(q, where('level', '==', options.level));
       }
@@ -240,27 +263,6 @@ class Logger {
     }
   }
 
-  // Get logs for multiple users
-  async getMultipleUsersLogs(
-    userIds: string[],
-    options?: {
-      level?: LogLevel;
-      startDate?: Date;
-      endDate?: Date;
-      limit?: number;
-    }
-  ): Promise<Map<string, LogEntry[]>> {
-    const result = new Map<string, LogEntry[]>();
-    
-    for (const userId of userIds) {
-      const logs = await this.getUserLogs(userId, options);
-      result.set(userId, logs);
-    }
-    
-    return result;
-  }
-
-  // Get recent logs across all users
   async getRecentLogs(limitCount: number = 100): Promise<LogEntry[]> {
     try {
       const logsRef = collection(db, 'system_logs');
@@ -279,7 +281,6 @@ class Logger {
     }
   }
 
-  // Get logs by level
   async getLogsByLevel(
     level: LogLevel,
     limitCount: number = 50
@@ -306,44 +307,6 @@ class Logger {
     }
   }
 
-  // Get logs by page
-  async getLogsByPage(
-    page: string,
-    limitCount: number = 50
-  ): Promise<LogEntry[]> {
-    try {
-      const logsRef = collection(db, 'system_logs');
-      const q = query(
-        logsRef,
-        where('page', '==', page),
-        orderBy('timestamp', 'desc'),
-        limit(limitCount)
-      );
-      const querySnapshot = await getDocs(q);
-      
-      const logs: LogEntry[] = [];
-      querySnapshot.forEach((doc) => {
-        logs.push({ id: doc.id, ...doc.data() } as LogEntry);
-      });
-
-      return logs;
-    } catch (error) {
-      console.error('Error getting logs by page:', error);
-      return [];
-    }
-  }
-
-  // Get error logs
-  async getErrorLogs(limitCount: number = 50): Promise<LogEntry[]> {
-    return this.getLogsByLevel('error', limitCount);
-  }
-
-  // Get warning logs
-  async getWarningLogs(limitCount: number = 50): Promise<LogEntry[]> {
-    return this.getLogsByLevel('warning', limitCount);
-  }
-
-  // Get user activity summary
   async getUserActivitySummary(userId: string): Promise<{
     totalLogs: number;
     errors: number;
@@ -354,12 +317,16 @@ class Logger {
     try {
       const logs = await this.getUserLogs(userId, { limit: 1000 });
       
+      const pages = logs
+        .map(l => l.page)
+        .filter((page): page is string => page !== undefined && page !== null);
+      
       const summary = {
         totalLogs: logs.length,
         errors: logs.filter(l => l.level === 'error').length,
         warnings: logs.filter(l => l.level === 'warning').length,
         lastActive: logs.length > 0 ? new Date(logs[0].timestamp) : null,
-        pages: [...new Set(logs.map(l => l.page).filter(Boolean))]
+        pages: [...new Set(pages)]
       };
 
       return summary;
@@ -375,37 +342,18 @@ class Logger {
     }
   }
 
-  // Delete old logs (admin function - would need backend)
-  async deleteOldLogs(daysOld: number = 30): Promise<boolean> {
-    // This would need to be implemented as a Cloud Function
-    // for security reasons, can't delete from client
-    console.warn('Delete old logs should be implemented as a Cloud Function');
-    return false;
-  }
-
-  // Export logs as JSON
   exportLogs(logs: LogEntry[]): string {
     return JSON.stringify(logs, null, 2);
   }
 
-  // Clear cache
   clearCache() {
     this.logCache.clear();
   }
 
-  // Enable/disable logging
   enable() { this.enabled = true; }
   disable() { this.enabled = false; }
   enableConsole() { this.consoleEnabled = true; }
   disableConsole() { this.consoleEnabled = false; }
-
-  // Get cache stats
-  getCacheStats() {
-    return {
-      size: this.logCache.size,
-      entries: Array.from(this.logCache.keys())
-    };
-  }
 }
 
 export const logger = new Logger();

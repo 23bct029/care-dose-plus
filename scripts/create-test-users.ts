@@ -1,22 +1,14 @@
+import { firebaseConfig } from '../src/lib/firebase';
 import { initializeApp } from 'firebase/app';
 import { getAuth, createUserWithEmailAndPassword } from 'firebase/auth';
 import { getFirestore, doc, setDoc } from 'firebase/firestore';
-
-// Your Firebase configuration
-const firebaseConfig = {
-  apiKey: "AIzaSyDnokm6rJx8OQXuYxPHpUBzVjmCd4bgtq0",
-  authDomain: "caredose-6b966.firebaseapp.com",
-  projectId: "caredose-6b966",
-  storageBucket: "caredose-6b966.firebasestorage.app",
-  messagingSenderId: "773546090775",
-  appId: "1:773546090775:web:acd360e9197b378ede5752",
-  measurementId: "G-YK6X2BMHC7"
-};
 
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
+
+// ... rest of the codenst db = getFirestore(app);
 
 const testUsers = [
   { email: 'admin@caredose.com', password: 'Admin@123', name: 'Admin User', role: 'admin' },

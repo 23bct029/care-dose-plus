@@ -1,5 +1,5 @@
 import { defineConfig } from 'vite';
-import react from '@vitejs/plugin-react-swc';
+import react from '@vitejs/plugin-react';
 import path from 'path';
 
 export default defineConfig({
@@ -9,20 +9,18 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src'),
     },
   },
-  server: {
-    port: 8080,
-    open: true,
-  },
   build: {
-    outDir: 'dist',
-    sourcemap: false,
-    minify: 'terser',
+    // Increase warning limit to 1000kB (optional)
+    chunkSizeWarningLimit: 1000,
+    
+    // Manual chunk splitting for better performance
     rollupOptions: {
       output: {
         manualChunks: {
-          vendor: ['react', 'react-dom', 'react-router-dom'],
-          firebase: ['firebase/app', 'firebase/auth', 'firebase/firestore'],
-          ui: ['@radix-ui/react-accordion', '@radix-ui/react-dialog', '@radix-ui/react-tabs'],
+          // Split vendor libraries into separate chunks
+          'react-vendor': ['react', 'react-dom', 'react-router-dom'],
+          'firebase-vendor': ['firebase/app', 'firebase/auth', 'firebase/firestore', 'firebase/storage', 'firebase/functions'],
+          'ui-vendor': ['lucide-react', 'react-day-picker', 'clsx', 'tailwind-merge'],
         },
       },
     },

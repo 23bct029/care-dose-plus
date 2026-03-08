@@ -1,464 +1,495 @@
+// src/pages/Connections.tsx
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { getCurrentUser, getUserProfile } from '@/lib/firebase-auth';
-import { db } from '@/lib/firebase';
-import { collection, query, where, getDocs, addDoc, updateDoc, deleteDoc, doc, onSnapshot } from 'firebase/firestore';
+import { auth, db } from '@/lib/firebase';
+import { 
+  collection, query, where, onSnapshot, 
+  addDoc, updateDoc, doc, serverTimestamp, orderBy,
+  getDocs
+} from 'firebase/firestore';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
-import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Input } from '@/components/ui/input';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { 
-  UserPlus, Mail, Phone, CheckCircle, XCircle, 
-  Clock, QrCode, Scan, Send, Trash2, UserCheck 
+  Users, UserPlus, UserCheck, UserX, 
+  Bell, Clock, ArrowLeft, MessageSquare, Phone, Mail,
+  CheckCircle, XCircle
 } from 'lucide-react';
 
+interface Connection {
+  id: string;
+  users: string[];
+  userEmails: string[];
+  relationship: string;
+  status: 'active' | 'inactive';
+  createdAt: any;
+}
+
+interface Invitation {
+  id: string;
+  fromUserId: string;
+  fromUserEmail: string;
+  fromUserName: string;
+  toUserId: string;
+  toEmail: string;
+  toUserName: string;
+  relationship: string;
+  status: 'pending' | 'accepted' | 'rejected';
+  createdAt: any;
+}
+
+interface Notification {
+  id: string;
+  userId: string;
+  type: string;
+  fromUserId: string;
+  fromUserName: string;
+  message: string;
+  read: boolean;
+  createdAt: any;
+}
+
 const Connections = () => {
-  const [user, setUser] = useState<any>(null);
-  const [profile, setProfile] = useState<any>(null);
-  const [connections, setConnections] = useState<any[]>([]);
-  const [pendingInvites, setPendingInvites] = useState<any[]>([]);
+  const [user, setUser] = useState(auth.currentUser);
+  const [connections, setConnections] = useState<Connection[]>([]);
+  const [invitations, setInvitations] = useState<{ received: Invitation[]; sent: Invitation[] }>({
+    received: [],
+    sent: []
+  });
+  const [notifications, setNotifications] = useState<Notification[]>([]);
   const [inviteEmail, setInviteEmail] = useState('');
-  const [newUserEmail, setNewUserEmail] = useState('');
-  const [newUserPassword, setNewUserPassword] = useState('');
-  const [newUserName, setNewUserName] = useState('');
-  const [newUserRole, setNewUserRole] = useState('elderly');
   const [loading, setLoading] = useState(false);
-  const [message, setMessage] = useState('');
   const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+  
   const navigate = useNavigate();
 
   useEffect(() => {
-    loadUserData();
+    const unsubscribeAuth = auth.onAuthStateChanged((user) => {
+      setUser(user);
+    });
+    return () => unsubscribeAuth();
   }, []);
 
-  const loadUserData = async () => {
-    try {
-      const currentUser = await getCurrentUser();
-      if (!currentUser) {
-        navigate('/login');
-        return;
-      }
-      setUser(currentUser);
+  // Real-time listeners
+  useEffect(() => {
+    if (!user) return;
 
-      const userProfile = await getUserProfile(currentUser.uid);
-      setProfile(userProfile);
-
-      // Load connections based on user role
-      loadConnections(currentUser.uid, userProfile.role);
-    } catch (error) {
-      console.error('Error loading user data:', error);
-    }
-  };
-
-  const loadConnections = (userId: string, role: string) => {
-    let q;
-    
-    if (role === 'elderly') {
-      // Elderly sees their caregivers and doctors
-      q = query(
-        collection(db, 'connections'),
-        where('elderlyId', '==', userId)
-      );
-    } else if (role === 'caregiver') {
-      // Caregiver sees their elderly patients
-      q = query(
-        collection(db, 'connections'),
-        where('caregiverId', '==', userId)
-      );
-    } else if (role === 'doctor') {
-      // Doctor sees their patients
-      q = query(
-        collection(db, 'connections'),
-        where('doctorId', '==', userId)
-      );
-    } else {
-      return;
-    }
-
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const connectionsList: any[] = [];
-      snapshot.forEach((doc) => {
-        connectionsList.push({ id: doc.id, ...doc.data() });
-      });
-      setConnections(connectionsList);
-    });
-
-    // Load pending invites
-    loadPendingInvites(userId);
-
-    return unsubscribe;
-  };
-
-  const loadPendingInvites = async (userId: string) => {
-    const q = query(
-      collection(db, 'invites'),
-      where('targetId', '==', userId),
+    // Received invitations
+    const receivedQuery = query(
+      collection(db, 'invitations'),
+      where('toUserId', '==', user.uid),
       where('status', '==', 'pending')
     );
     
-    const snapshot = await getDocs(q);
-    const invites: any[] = [];
-    snapshot.forEach((doc) => {
-      invites.push({ id: doc.id, ...doc.data() });
+    const unsubscribeReceived = onSnapshot(receivedQuery, (snapshot) => {
+      const received = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      })) as Invitation[];
+      setInvitations(prev => ({ ...prev, received }));
     });
-    setPendingInvites(invites);
-  };
 
-  // Option 1: Elderly invites caregiver by email
-  const sendInvite = async () => {
-    if (!inviteEmail.trim()) {
-      setError('Please enter an email');
-      return;
-    }
+    // Sent invitations
+    const sentQuery = query(
+      collection(db, 'invitations'),
+      where('fromUserId', '==', user.uid),
+      where('status', '==', 'pending')
+    );
+    
+    const unsubscribeSent = onSnapshot(sentQuery, (snapshot) => {
+      const sent = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      })) as Invitation[];
+      setInvitations(prev => ({ ...prev, sent }));
+    });
 
-    setLoading(true);
+    // Active connections
+    const connectionsQuery = query(
+      collection(db, 'connections'),
+      where('users', 'array-contains', user.uid),
+      where('status', '==', 'active')
+    );
+    
+    const unsubscribeConnections = onSnapshot(connectionsQuery, (snapshot) => {
+      const connectionsData = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      })) as Connection[];
+      setConnections(connectionsData);
+    });
+
+    // Notifications
+    const notificationsQuery = query(
+      collection(db, 'notifications'),
+      where('userId', '==', user.uid),
+      where('read', '==', false),
+      orderBy('createdAt', 'desc')
+    );
+    
+    const unsubscribeNotifications = onSnapshot(notificationsQuery, (snapshot) => {
+      const notificationsData = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      })) as Notification[];
+      setNotifications(notificationsData);
+    });
+
+    return () => {
+      unsubscribeReceived();
+      unsubscribeSent();
+      unsubscribeConnections();
+      unsubscribeNotifications();
+    };
+  }, [user]);
+
+  const handleSendInvitation = async (e: React.FormEvent) => {
+    e.preventDefault();
     setError('');
-    setMessage('');
+    setSuccess('');
+    setLoading(true);
 
     try {
-      // Check if user exists
-      const usersRef = collection(db, 'users');
-      const q = query(usersRef, where('email', '==', inviteEmail));
-      const snapshot = await getDocs(q);
+      if (!user) throw new Error('You must be logged in');
 
-      if (snapshot.empty) {
-        setError('No user found with this email');
-        setLoading(false);
-        return;
+      // Find user by email
+      const usersQuery = query(
+        collection(db, 'users'),
+        where('email', '==', inviteEmail)
+      );
+      const usersSnapshot = await getDocs(usersQuery);
+      
+      if (usersSnapshot.empty) {
+        throw new Error('User with this email not found');
       }
 
-      const targetUser = snapshot.docs[0].data();
+      const targetUser = usersSnapshot.docs[0];
+      const targetUserId = targetUser.id;
+      const targetUserData = targetUser.data();
 
-      // Create invite
-      await addDoc(collection(db, 'invites'), {
-        fromId: user.uid,
-        fromEmail: profile?.email,
-        fromName: profile?.name,
-        fromRole: profile?.role,
-        targetId: targetUser.uid,
-        targetEmail: inviteEmail,
-        targetRole: targetUser.role,
-        status: 'pending',
-        createdAt: new Date().toISOString(),
-        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()
-      });
-
-      setMessage(`Invitation sent to ${inviteEmail}`);
-      setInviteEmail('');
-    } catch (error: any) {
-      console.error('Error sending invite:', error);
-      setError(error.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Option 2: Caregiver creates account for elderly
-  const createElderlyAccount = async () => {
-    if (!newUserEmail.trim() || !newUserPassword.trim() || !newUserName.trim()) {
-      setError('All fields are required');
-      return;
-    }
-
-    setLoading(true);
-    setError('');
-    setMessage('');
-
-    try {
-      // This would need a Cloud Function for security
-      // For now, simulate success
-      setMessage(`Account created for ${newUserName}. They can login with the provided credentials.`);
+      // Check if already connected
+      const existingConnection = connections.find(conn => 
+        conn.users.includes(targetUserId)
+      );
       
-      // Clear form
-      setNewUserEmail('');
-      setNewUserPassword('');
-      setNewUserName('');
-      setNewUserRole('elderly');
-    } catch (error: any) {
-      console.error('Error creating account:', error);
-      setError(error.message);
+      if (existingConnection) {
+        throw new Error('Already connected with this user');
+      }
+
+      // Check for existing pending invitation
+      const existingInvite = invitations.sent.find(inv => 
+        inv.toUserId === targetUserId
+      );
+      
+      if (existingInvite) {
+        throw new Error('Invitation already sent to this user');
+      }
+
+      // Create invitation
+      await addDoc(collection(db, 'invitations'), {
+        fromUserId: user.uid,
+        fromUserEmail: user.email,
+        fromUserName: user.displayName || user.email,
+        toUserId: targetUserId,
+        toEmail: inviteEmail,
+        toUserName: targetUserData.name || inviteEmail,
+        relationship: 'connection',
+        status: 'pending',
+        createdAt: serverTimestamp()
+      });
+
+      // Create notification for recipient
+      await addDoc(collection(db, 'notifications'), {
+        userId: targetUserId,
+        type: 'invitation',
+        fromUserId: user.uid,
+        fromUserName: user.displayName || user.email,
+        message: `You have a new connection request from ${user.displayName || user.email}`,
+        read: false,
+        createdAt: serverTimestamp()
+      });
+
+      setSuccess(`Invitation sent to ${inviteEmail}`);
+      setInviteEmail('');
+    } catch (err: any) {
+      setError(err.message);
     } finally {
       setLoading(false);
     }
   };
 
-  // Accept invite
-  const acceptInvite = async (inviteId: string) => {
+  const handleAccept = async (invitationId: string) => {
     try {
-      const inviteRef = doc(db, 'invites', inviteId);
-      await updateDoc(inviteRef, { status: 'accepted' });
-
-      // Create connection
-      await addDoc(collection(db, 'connections'), {
-        elderlyId: profile?.role === 'elderly' ? user.uid : null,
-        caregiverId: profile?.role === 'caregiver' ? user.uid : null,
-        doctorId: profile?.role === 'doctor' ? user.uid : null,
-        connectedAt: new Date().toISOString(),
-        status: 'active'
+      const invitationRef = doc(db, 'invitations', invitationId);
+      await updateDoc(invitationRef, {
+        status: 'accepted',
+        acceptedAt: serverTimestamp()
       });
 
-      loadPendingInvites(user.uid);
-    } catch (error) {
-      console.error('Error accepting invite:', error);
+      const invitation = invitations.received.find(i => i.id === invitationId);
+      
+      if (invitation) {
+        // Create connection
+        await addDoc(collection(db, 'connections'), {
+          users: [invitation.fromUserId, invitation.toUserId],
+          userEmails: [invitation.fromUserEmail, invitation.toEmail],
+          relationship: invitation.relationship,
+          status: 'active',
+          createdAt: serverTimestamp(),
+          initiatedBy: invitation.fromUserId
+        });
+
+        // Create notification for sender
+        await addDoc(collection(db, 'notifications'), {
+          userId: invitation.fromUserId,
+          type: 'invitation_accepted',
+          fromUserId: user?.uid,
+          fromUserName: user?.displayName || user?.email,
+          message: `${user?.displayName || user?.email} accepted your connection request`,
+          read: false,
+          createdAt: serverTimestamp()
+        });
+      }
+
+      setSuccess('Invitation accepted!');
+    } catch (err: any) {
+      setError(err.message);
     }
   };
 
-  // Decline invite
-  const declineInvite = async (inviteId: string) => {
+  const handleReject = async (invitationId: string) => {
     try {
-      const inviteRef = doc(db, 'invites', inviteId);
-      await updateDoc(inviteRef, { status: 'declined' });
-      loadPendingInvites(user.uid);
-    } catch (error) {
-      console.error('Error declining invite:', error);
+      const invitationRef = doc(db, 'invitations', invitationId);
+      await updateDoc(invitationRef, {
+        status: 'rejected',
+        rejectedAt: serverTimestamp()
+      });
+      setSuccess('Invitation rejected');
+    } catch (err: any) {
+      setError(err.message);
     }
   };
 
-  // Remove connection
-  const removeConnection = async (connectionId: string) => {
-    if (!confirm('Are you sure you want to remove this connection?')) return;
-    
+  const handleMarkRead = async (notificationId: string) => {
     try {
-      await deleteDoc(doc(db, 'connections', connectionId));
-    } catch (error) {
-      console.error('Error removing connection:', error);
+      const notificationRef = doc(db, 'notifications', notificationId);
+      await updateDoc(notificationRef, { read: true });
+    } catch (err) {
+      console.error('Error marking notification as read:', err);
     }
   };
 
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-purple-50 p-6">
-      <div className="max-w-4xl mx-auto">
-        <h1 className="text-3xl font-bold mb-6">Connections</h1>
+  const getOtherUser = (connection: Connection) => {
+    const otherUserId = connection.users.find(id => id !== user?.uid);
+    const otherEmail = connection.userEmails.find(email => email !== user?.email);
+    return { id: otherUserId, email: otherEmail };
+  };
 
-        {/* Pending Invites */}
-        {pendingInvites.length > 0 && (
-          <Card className="mb-6 border-yellow-400">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-yellow-700">
-                <Clock className="h-5 w-5" />
-                Pending Invitations
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-3">
-                {pendingInvites.map((invite) => (
-                  <div key={invite.id} className="flex items-center justify-between p-3 bg-yellow-50 rounded-lg border border-yellow-200">
-                    <div>
-                      <p className="font-medium">{invite.fromName}</p>
-                      <p className="text-sm text-gray-600">{invite.fromEmail}</p>
-                      <Badge className="mt-1">{invite.fromRole}</Badge>
-                    </div>
-                    <div className="flex gap-2">
-                      <Button 
-                        size="sm" 
-                        className="bg-green-600 hover:bg-green-700"
-                        onClick={() => acceptInvite(invite.id)}
-                      >
-                        <CheckCircle className="h-4 w-4 mr-1" />
-                        Accept
-                      </Button>
-                      <Button 
-                        size="sm" 
-                        variant="outline"
-                        className="border-red-300 text-red-600 hover:bg-red-50"
-                        onClick={() => declineInvite(invite.id)}
-                      >
-                        <XCircle className="h-4 w-4 mr-1" />
-                        Decline
-                      </Button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-        )}
-
-        {/* Tabs for different connection methods */}
-        <Tabs defaultValue="invite" className="space-y-4">
-          <TabsList className="grid w-full grid-cols-3">
-            <TabsTrigger value="invite">Invite by Email</TabsTrigger>
-            <TabsTrigger value="create">Create Account</TabsTrigger>
-            <TabsTrigger value="qr">QR Code</TabsTrigger>
-          </TabsList>
-
-          {/* Option 1: Invite by Email */}
-          <TabsContent value="invite">
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-lg">Invite Someone to Connect</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="space-y-2">
-                  <Label>Email Address</Label>
-                  <div className="flex gap-2">
-                    <Input
-                      placeholder="Enter email address"
-                      value={inviteEmail}
-                      onChange={(e) => setInviteEmail(e.target.value)}
-                      className="flex-1"
-                    />
-                    <Button 
-                      onClick={sendInvite}
-                      disabled={loading}
-                      className="bg-blue-600 hover:bg-blue-700"
-                    >
-                      <Send className="h-4 w-4 mr-2" />
-                      Send Invite
-                    </Button>
-                  </div>
-                </div>
-
-                {message && (
-                  <Alert className="bg-green-50 border-green-500">
-                    <CheckCircle className="h-4 w-4 text-green-600" />
-                    <AlertDescription className="text-green-700">{message}</AlertDescription>
-                  </Alert>
-                )}
-
-                {error && (
-                  <Alert variant="destructive">
-                    <XCircle className="h-4 w-4" />
-                    <AlertDescription>{error}</AlertDescription>
-                  </Alert>
-                )}
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          {/* Option 2: Create Account for Elderly */}
-          <TabsContent value="create">
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-lg">Create Account for Elderly Person</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="space-y-2">
-                  <Label>Full Name</Label>
-                  <Input
-                    placeholder="Enter full name"
-                    value={newUserName}
-                    onChange={(e) => setNewUserName(e.target.value)}
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label>Email Address</Label>
-                  <Input
-                    type="email"
-                    placeholder="Enter email"
-                    value={newUserEmail}
-                    onChange={(e) => setNewUserEmail(e.target.value)}
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label>Password</Label>
-                  <Input
-                    type="password"
-                    placeholder="Enter password"
-                    value={newUserPassword}
-                    onChange={(e) => setNewUserPassword(e.target.value)}
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label>Role</Label>
-                  <select
-                    value={newUserRole}
-                    onChange={(e) => setNewUserRole(e.target.value)}
-                    className="w-full p-2 border rounded-md"
-                  >
-                    <option value="elderly">Elderly</option>
-                    <option value="caregiver">Caregiver</option>
-                    <option value="doctor">Doctor</option>
-                  </select>
-                </div>
-
-                <Button 
-                  onClick={createElderlyAccount}
-                  disabled={loading}
-                  className="w-full bg-green-600 hover:bg-green-700"
-                >
-                  <UserPlus className="h-4 w-4 mr-2" />
-                  Create Account
-                </Button>
-
-                {message && (
-                  <Alert className="bg-green-50 border-green-500 mt-4">
-                    <CheckCircle className="h-4 w-4 text-green-600" />
-                    <AlertDescription className="text-green-700">{message}</AlertDescription>
-                  </Alert>
-                )}
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          {/* Option 3: QR Code */}
-          <TabsContent value="qr">
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-lg">Connect via QR Code</CardTitle>
-              </CardHeader>
-              <CardContent className="text-center py-8">
-                <div className="bg-white p-8 inline-block rounded-lg mb-4">
-                  <QrCode className="h-32 w-32 text-gray-800" />
-                </div>
-                <p className="text-gray-600 mb-4">Scan this QR code to connect instantly</p>
-                <Button variant="outline" className="gap-2">
-                  <Scan className="h-4 w-4" />
-                  Scan QR Code
-                </Button>
-              </CardContent>
-            </Card>
-          </TabsContent>
-        </Tabs>
-
-        {/* Current Connections */}
-        <Card className="mt-6">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <UserCheck className="h-5 w-5 text-green-600" />
-              Your Connections
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {connections.length === 0 ? (
-              <p className="text-center text-gray-500 py-4">No connections yet</p>
-            ) : (
-              <div className="space-y-3">
-                {connections.map((conn) => (
-                  <div key={conn.id} className="flex items-center justify-between p-3 border rounded-lg">
-                    <div className="flex items-center gap-3">
-                      <Avatar>
-                        <AvatarFallback className="bg-blue-100 text-blue-800">
-                          {conn.name?.charAt(0) || 'U'}
-                        </AvatarFallback>
-                      </Avatar>
-                      <div>
-                        <p className="font-medium">{conn.name || 'Connected User'}</p>
-                        <p className="text-sm text-gray-600">{conn.role}</p>
-                      </div>
-                    </div>
-                    <Button 
-                      variant="ghost" 
-                      size="sm"
-                      className="text-red-600 hover:text-red-700 hover:bg-red-50"
-                      onClick={() => removeConnection(conn.id)}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </div>
-                ))}
-              </div>
-            )}
+  if (!user) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+        <Card className="w-full max-w-md">
+          <CardContent className="p-6 text-center">
+            <Users className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+            <p className="text-gray-600 mb-4">Please log in to manage connections</p>
+            <Button onClick={() => navigate('/login')}>
+              Go to Login
+            </Button>
           </CardContent>
         </Card>
       </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <header className="bg-white border-b sticky top-0 z-10">
+        <div className="container mx-auto px-4 py-4">
+          <div className="flex items-center gap-4">
+            <Button variant="ghost" size="icon" onClick={() => navigate(-1)}>
+              <ArrowLeft className="h-5 w-5" />
+            </Button>
+            <h1 className="text-2xl font-bold">Manage Connections</h1>
+          </div>
+        </div>
+      </header>
+
+      <main className="container mx-auto px-4 py-8">
+        <Card className="max-w-4xl mx-auto">
+          <CardContent className="p-6">
+            <Tabs defaultValue="connections" className="space-y-6">
+              <TabsList className="grid w-full grid-cols-4">
+                <TabsTrigger value="connections">
+                  Connections ({connections.length})
+                </TabsTrigger>
+                <TabsTrigger value="received" className="relative">
+                  Received ({invitations.received.length})
+                  {invitations.received.length > 0 && (
+                    <span className="absolute -top-1 -right-1 h-4 w-4 bg-red-500 rounded-full text-[10px] text-white flex items-center justify-center">
+                      {invitations.received.length}
+                    </span>
+                  )}
+                </TabsTrigger>
+                <TabsTrigger value="sent">
+                  Sent ({invitations.sent.length})
+                </TabsTrigger>
+                <TabsTrigger value="notifications" className="relative">
+                  Notifications
+                  {notifications.length > 0 && (
+                    <span className="absolute -top-1 -right-1 h-4 w-4 bg-red-500 rounded-full text-[10px] text-white flex items-center justify-center">
+                      {notifications.length}
+                    </span>
+                  )}
+                </TabsTrigger>
+              </TabsList>
+
+              {/* Send Invitation Form - Shows in all tabs */}
+              <div className="p-4 bg-gray-50 rounded-lg">
+                <form onSubmit={handleSendInvitation} className="flex gap-2">
+                  <Input
+                    type="email"
+                    value={inviteEmail}
+                    onChange={(e) => setInviteEmail(e.target.value)}
+                    placeholder="Enter email address to invite"
+                    className="flex-1"
+                    required
+                  />
+                  <Button type="submit" disabled={loading}>
+                    <UserPlus className="h-4 w-4 mr-2" />
+                    {loading ? 'Sending...' : 'Invite'}
+                  </Button>
+                </form>
+                {error && <p className="text-red-500 text-sm mt-2">{error}</p>}
+                {success && <p className="text-green-500 text-sm mt-2">{success}</p>}
+              </div>
+
+              {/* Connections Tab */}
+              <TabsContent value="connections" className="space-y-4">
+                {connections.length === 0 ? (
+                  <div className="text-center py-8">
+                    <Users className="h-12 w-12 text-gray-300 mx-auto mb-4" />
+                    <p className="text-gray-500">No connections yet</p>
+                    <p className="text-sm text-gray-400 mt-2">
+                      Invite someone to get started
+                    </p>
+                  </div>
+                ) : (
+                  connections.map((conn) => {
+                    const other = getOtherUser(conn);
+                    return (
+                      <div key={conn.id} className="flex items-center justify-between p-4 border rounded-lg hover:bg-gray-50">
+                        <div className="flex items-center gap-3">
+                          <Avatar>
+                            <AvatarFallback className="bg-blue-100 text-blue-600">
+                              {other.email?.[0]?.toUpperCase()}
+                            </AvatarFallback>
+                          </Avatar>
+                          <div>
+                            <p className="font-medium">{other.email}</p>
+                            <p className="text-xs text-green-600">Connected</p>
+                          </div>
+                        </div>
+                        <div className="flex gap-2">
+                          <Button variant="ghost" size="sm">
+                            <MessageSquare className="h-4 w-4" />
+                          </Button>
+                          <Button variant="ghost" size="sm">
+                            <Phone className="h-4 w-4" />
+                          </Button>
+                          <Button variant="ghost" size="sm">
+                            <Mail className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </TabsContent>
+
+              {/* Received Invitations Tab */}
+              <TabsContent value="received" className="space-y-4">
+                {invitations.received.length === 0 ? (
+                  <div className="text-center py-8">
+                    <Clock className="h-12 w-12 text-gray-300 mx-auto mb-4" />
+                    <p className="text-gray-500">No pending invitations</p>
+                  </div>
+                ) : (
+                  invitations.received.map((inv) => (
+                    <div key={inv.id} className="flex items-center justify-between p-4 border rounded-lg">
+                      <div>
+                        <p className="font-medium">{inv.fromUserName}</p>
+                        <p className="text-sm text-gray-600">{inv.fromUserEmail}</p>
+                      </div>
+                      <div className="flex gap-2">
+                        <Button 
+                          size="sm" 
+                          className="bg-green-600 hover:bg-green-700"
+                          onClick={() => handleAccept(inv.id)}
+                        >
+                          <UserCheck className="h-4 w-4 mr-1" />
+                          Accept
+                        </Button>
+                        <Button 
+                          size="sm" 
+                          variant="outline"
+                          className="text-red-600 border-red-200 hover:bg-red-50"
+                          onClick={() => handleReject(inv.id)}
+                        >
+                          <UserX className="h-4 w-4 mr-1" />
+                          Reject
+                        </Button>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </TabsContent>
+
+              {/* Sent Invitations Tab */}
+              <TabsContent value="sent" className="space-y-4">
+                {invitations.sent.length === 0 ? (
+                  <div className="text-center py-8">
+                    <Clock className="h-12 w-12 text-gray-300 mx-auto mb-4" />
+                    <p className="text-gray-500">No pending invitations sent</p>
+                  </div>
+                ) : (
+                  invitations.sent.map((inv) => (
+                    <div key={inv.id} className="p-4 border rounded-lg">
+                      <p className="font-medium">{inv.toUserName || inv.toEmail}</p>
+                      <p className="text-sm text-gray-600">{inv.toEmail}</p>
+                      <Badge variant="outline" className="mt-2">Pending</Badge>
+                    </div>
+                  ))
+                )}
+              </TabsContent>
+
+              {/* Notifications Tab */}
+              <TabsContent value="notifications" className="space-y-4">
+                {notifications.length === 0 ? (
+                  <div className="text-center py-8">
+                    <Bell className="h-12 w-12 text-gray-300 mx-auto mb-4" />
+                    <p className="text-gray-500">No new notifications</p>
+                  </div>
+                ) : (
+                  notifications.map((notif) => (
+                    <div 
+                      key={notif.id} 
+                      className="p-4 bg-blue-50 border border-blue-200 rounded-lg cursor-pointer hover:bg-blue-100"
+                      onClick={() => handleMarkRead(notif.id)}
+                    >
+                      <p className="text-sm">{notif.message}</p>
+                      <p className="text-xs text-blue-600 mt-1">Click to mark as read</p>
+                    </div>
+                  ))
+                )}
+              </TabsContent>
+            </Tabs>
+          </CardContent>
+        </Card>
+      </main>
     </div>
   );
 };

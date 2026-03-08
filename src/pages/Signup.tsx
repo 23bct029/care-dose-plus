@@ -7,7 +7,18 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Pill, User, Mail, Lock, Heart, Users, Stethoscope, AlertCircle, Eye, EyeOff } from 'lucide-react';
+import { 
+  Pill, 
+  Mail, 
+  Lock, 
+  User, 
+  Eye, 
+  EyeOff, 
+  AlertCircle,
+  Heart,
+  Users,
+  Stethoscope 
+} from 'lucide-react';
 
 const Signup = () => {
   const [name, setName] = useState('');
@@ -43,15 +54,35 @@ const Signup = () => {
     }
 
     try {
-      const userProfile = await signUp(trimmedEmail, trimmedPassword, trimmedName, role);
-      
+      const result = await signUp(trimmedEmail, trimmedPassword, {
+        name: trimmedName,
+        role: role
+      });
+
+      if (result.error) {
+        setError(result.error);
+        await logger.warning('Failed signup attempt', { 
+          email: trimmedEmail, 
+          role: role,
+          error: result.error 
+        });
+        setLoading(false);
+        return;
+      }
+
+      if (!result.user) {
+        setError('Signup failed - no user returned');
+        setLoading(false);
+        return;
+      }
+
       // Log successful signup
       await logger.info('New user signed up', { 
         email: trimmedEmail, 
-        role,
-        userId: userProfile.uid 
+        role: role,
+        userId: result.user.uid 
       });
-      
+
       setSuccess('Account created successfully! Redirecting to login...');
       
       // Clear form
@@ -64,14 +95,13 @@ const Signup = () => {
       setTimeout(() => {
         navigate('/login');
       }, 3000);
+
     } catch (err: any) {
-      // Log failed signup
-      await logger.warning('Failed signup attempt', { 
+      await logger.error('Unexpected signup error', { 
         email: trimmedEmail, 
-        role,
         error: err.message 
       });
-      setError(err.message);
+      setError('An unexpected error occurred. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -92,14 +122,16 @@ const Signup = () => {
         
         <CardContent>
           <form onSubmit={handleSignup} className="space-y-4">
+            {/* Name Field */}
             <div className="space-y-2">
               <Label htmlFor="name">Full Name</Label>
               <div className="relative">
                 <User className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
                 <Input
                   id="name"
+                  type="text"
                   value={name}
-                  onChange={(e) => setName(e.target.value)}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setName(e.target.value)}
                   placeholder="Enter your full name"
                   required
                   className="pl-10 border-2 focus:border-blue-500"
@@ -108,6 +140,7 @@ const Signup = () => {
               </div>
             </div>
 
+            {/* Email Field */}
             <div className="space-y-2">
               <Label htmlFor="email">Email</Label>
               <div className="relative">
@@ -116,7 +149,7 @@ const Signup = () => {
                   id="email"
                   type="email"
                   value={email}
-                  onChange={(e) => setEmail(e.target.value)}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEmail(e.target.value)}
                   placeholder="Enter your email"
                   required
                   className="pl-10 border-2 focus:border-blue-500"
@@ -125,6 +158,7 @@ const Signup = () => {
               </div>
             </div>
 
+            {/* Password Field */}
             <div className="space-y-2">
               <Label htmlFor="password">Password</Label>
               <div className="relative">
@@ -133,7 +167,7 @@ const Signup = () => {
                   id="password"
                   type={showPassword ? "text" : "password"}
                   value={password}
-                  onChange={(e) => setPassword(e.target.value)}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setPassword(e.target.value)}
                   placeholder="Minimum 6 characters"
                   required
                   className="pl-10 pr-10 border-2 focus:border-blue-500"
@@ -147,8 +181,10 @@ const Signup = () => {
                   {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </button>
               </div>
+              <p className="text-xs text-gray-500 mt-1">Password must be at least 6 characters</p>
             </div>
 
+            {/* Role Selection */}
             <div className="space-y-2">
               <Label>I am a:</Label>
               <div className="grid grid-cols-3 gap-2">
@@ -157,49 +193,37 @@ const Signup = () => {
                   variant={role === 'elderly' ? 'default' : 'outline'}
                   onClick={() => setRole('elderly')}
                   className={`flex flex-col items-center py-4 h-auto ${
-                    role === 'elderly' 
-                      ? 'bg-gradient-to-r from-blue-600 to-indigo-600' 
-                      : ''
+                    role === 'elderly' ? 'bg-gradient-to-r from-blue-600 to-indigo-600' : ''
                   }`}
                   disabled={loading}
                 >
-                  <Heart className={`h-5 w-5 mb-1 ${
-                    role === 'elderly' ? 'text-white' : 'text-gray-600'
-                  }`} />
+                  <Heart className={`h-5 w-5 mb-1 ${role === 'elderly' ? 'text-white' : 'text-gray-600'}`} />
                   <span className="text-xs">Elderly</span>
                 </Button>
-                
+
                 <Button
                   type="button"
                   variant={role === 'caregiver' ? 'default' : 'outline'}
                   onClick={() => setRole('caregiver')}
                   className={`flex flex-col items-center py-4 h-auto ${
-                    role === 'caregiver' 
-                      ? 'bg-gradient-to-r from-green-600 to-emerald-600' 
-                      : ''
+                    role === 'caregiver' ? 'bg-gradient-to-r from-green-600 to-emerald-600' : ''
                   }`}
                   disabled={loading}
                 >
-                  <Users className={`h-5 w-5 mb-1 ${
-                    role === 'caregiver' ? 'text-white' : 'text-gray-600'
-                  }`} />
+                  <Users className={`h-5 w-5 mb-1 ${role === 'caregiver' ? 'text-white' : 'text-gray-600'}`} />
                   <span className="text-xs">Caregiver</span>
                 </Button>
-                
+
                 <Button
                   type="button"
                   variant={role === 'doctor' ? 'default' : 'outline'}
                   onClick={() => setRole('doctor')}
                   className={`flex flex-col items-center py-4 h-auto ${
-                    role === 'doctor' 
-                      ? 'bg-gradient-to-r from-purple-600 to-pink-600' 
-                      : ''
+                    role === 'doctor' ? 'bg-gradient-to-r from-purple-600 to-pink-600' : ''
                   }`}
                   disabled={loading}
                 >
-                  <Stethoscope className={`h-5 w-5 mb-1 ${
-                    role === 'doctor' ? 'text-white' : 'text-gray-600'
-                  }`} />
+                  <Stethoscope className={`h-5 w-5 mb-1 ${role === 'doctor' ? 'text-white' : 'text-gray-600'}`} />
                   <span className="text-xs">Doctor</span>
                 </Button>
               </div>
@@ -210,6 +234,7 @@ const Signup = () => {
             </Button>
           </form>
 
+          {/* Error Alert */}
           {error && (
             <Alert variant="destructive" className="mt-4">
               <AlertCircle className="h-4 w-4" />
@@ -217,6 +242,7 @@ const Signup = () => {
             </Alert>
           )}
 
+          {/* Success Alert */}
           {success && (
             <Alert className="mt-4 bg-green-50 border-green-500 text-green-700">
               <AlertCircle className="h-4 w-4" />
@@ -224,6 +250,7 @@ const Signup = () => {
             </Alert>
           )}
 
+          {/* Login Link */}
           <div className="mt-6 text-center">
             <p className="text-gray-600">
               Already have an account?{' '}

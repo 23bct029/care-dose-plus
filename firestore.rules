@@ -1,76 +1,19 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // User profiles
+    // Allow users to read/write their own data
     match /users/{userId} {
-      allow read: if request.auth != null;
-      allow write: if request.auth != null && request.auth.uid == userId;
-      
-      // Allow users to read their own data
-      match /private/{document=**} {
-        allow read, write: if request.auth != null && request.auth.uid == userId;
-      }
+      allow read, write: if request.auth != null && request.auth.uid == userId;
     }
     
-    // Medicines
-    match /medicines/{medicineId} {
-      allow read: if request.auth != null;
-      allow write: if request.auth != null && 
-        (resource.data.userId == request.auth.uid || 
-         request.resource.data.userId == request.auth.uid);
+    // Allow users to create their own profile during signup
+    match /users/{userId} {
+      allow create: if request.auth != null && request.auth.uid == userId;
     }
     
-    // Tracking
-    match /tracking/{trackingId} {
-      allow read: if request.auth != null;
-      allow write: if request.auth != null && 
-        request.resource.data.userId == request.auth.uid;
-    }
-    
-    // Appointments
-    match /appointments/{appointmentId} {
-      allow read: if request.auth != null;
-      allow write: if request.auth != null;
-    }
-    
-    // Caregiver relationships
-    match /caregiver_relationships/{relationshipId} {
-      allow read: if request.auth != null;
-      allow write: if request.auth != null;
-    }
-    
-    // Doctor patients
-    match /doctor_patients/{relationshipId} {
-      allow read: if request.auth != null;
-      allow write: if request.auth != null;
-    }
-    
-    // Prescriptions
-    match /prescriptions/{prescriptionId} {
-      allow read: if request.auth != null;
-      allow write: if request.auth != null;
-    }
-    
-    // Emergencies
-    match /emergencies/{emergencyId} {
-      allow read: if request.auth != null;
-      allow write: if request.auth != null;
-    }
-    
-    // Notifications
-    match /notifications/{notificationId} {
-      allow read: if request.auth != null && 
-        (resource.data.userId == request.auth.uid ||
-         request.auth.token.isAdmin == true);
-      allow write: if request.auth != null;
-    }
-    
-    // System logs (admin only)
-    match /system_logs/{logId} {
-      allow read: if request.auth != null && 
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
-      allow write: if request.auth != null && 
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    // For testing only - remove in production
+    match /{document=**} {
+      allow read, write: if request.auth != null;
     }
   }
 }

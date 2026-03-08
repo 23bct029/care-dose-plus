@@ -13,7 +13,11 @@ import AdminApp from '@/pages/AdminApp';
 import Schedule from '@/pages/Schedule';
 import Medicines from '@/pages/Medicines';
 import AddMedicine from '@/pages/AddMedicine';
-import AcceptInvite from '@/pages/AcceptInvite'; // Add this import
+import AcceptInvite from '@/pages/AcceptInvite';
+import Connections from '@/pages/Connections'; // Keep ONLY this one
+
+// REMOVE this line:
+// import ConnectionsPage from './pages/ConnectionsPage';
 
 function App() {
   useEffect(() => {
@@ -34,7 +38,7 @@ function App() {
           <Route path="/" element={<Navigate to="/login" replace />} />
           <Route path="/login" element={<Login />} />
           <Route path="/signup" element={<Signup />} />
-          <Route path="/accept-invite" element={<AcceptInvite />} /> {/* Add this route */}
+          <Route path="/accept-invite" element={<AcceptInvite />} />
           
           <Route path="/elderly" element={
             <ProtectedRoute allowedRoles={['elderly']}>
@@ -48,6 +52,21 @@ function App() {
             </ProtectedRoute>
           } />
           
+          {/* REMOVE this entire route block:
+          <Route path="/connections-page" element={
+            <ProtectedRoute allowedRoles={['elderly', 'caregiver', 'doctor', 'admin']}>
+              <ConnectionsPage />
+            </ProtectedRoute>
+          } />
+          */}
+
+          {/* KEEP only this one connections route */}
+          <Route path="/connections" element={
+            <ProtectedRoute allowedRoles={['elderly', 'caregiver', 'doctor', 'admin']}>
+              <Connections />
+            </ProtectedRoute>
+          } />
+
           <Route path="/doctor" element={
             <ProtectedRoute allowedRoles={['doctor']}>
               <DoctorApp />
