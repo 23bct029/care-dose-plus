@@ -10,7 +10,6 @@ import {
   deleteDoc, 
   doc, 
   onSnapshot,
-  orderBy,
   limit 
 } from 'firebase/firestore';
 import { sendBrowserNotification } from './notifications';
@@ -150,14 +149,19 @@ class ConnectionService {
     const q = query(
       collection(db, 'connections'),
       where('toId', '==', userId),
-      where('status', '==', 'pending'),
-      orderBy('createdAt', 'desc')
+      where('status', '==', 'pending')
     );
 
     return onSnapshot(q, (snapshot) => {
       const connections: Connection[] = [];
       snapshot.forEach((doc) => {
         connections.push({ id: doc.id, ...doc.data() } as Connection);
+      });
+      // Sort client-side
+      connections.sort((a: any, b: any) => {
+        const at = a.createdAt?.toMillis?.() || 0;
+        const bt = b.createdAt?.toMillis?.() || 0;
+        return bt - at;
       });
       callback(connections);
     });

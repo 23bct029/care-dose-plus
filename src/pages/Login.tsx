@@ -1,13 +1,11 @@
 import { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, Link, useLocation } from 'react-router-dom';
 import { logIn, getUserProfile } from '@/lib/firebase-auth';
-import { logger } from '@/lib/logger';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Pill, Mail, Lock, AlertCircle, Eye, EyeOff } from 'lucide-react';
+import { Pill, Mail, Lock, AlertCircle, Eye, EyeOff, Shield, Heart, CheckCircle } from 'lucide-react';
 
 const Login = () => {
   const [email, setEmail] = useState('');
@@ -16,181 +14,119 @@ const Login = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const navigate = useNavigate();
+  const location = useLocation();
+  const successMessage = (location.state as any)?.message || '';
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setError('');
-
-    const trimmedEmail = email.trim();
+    const trimmedEmail = email.trim().toLowerCase();
     const trimmedPassword = password.trim();
-
     if (!trimmedEmail || !trimmedPassword) {
-      setError('Email and password cannot be empty');
+      setError('Email and password are required');
       setLoading(false);
       return;
     }
-
     try {
-      // Attempt login
       const result = await logIn(trimmedEmail, trimmedPassword);
-      
-      if (result.error) {
-        setError(result.error);
-        await logger.warning('Failed login attempt', { 
-          email: trimmedEmail, 
-          error: result.error 
-        });
-        setLoading(false);
-        return;
-      }
-
-      if (!result.user) {
-        setError('Login failed - no user returned');
-        setLoading(false);
-        return;
-      }
-
-      // Log successful login
-      await logger.info('User logged in', { 
-        email: trimmedEmail,
-        userId: result.user.uid 
-      });
-
-      // Get user profile from Firestore
+      if (result.error) { setError(result.error); setLoading(false); return; }
+      if (!result.user) { setError('Login failed — please try again'); setLoading(false); return; }
       const userProfile = await getUserProfile(result.user.uid);
-      console.log('User profile:', userProfile);
-      
-      if (!userProfile) {
-        setError('User profile not found');
-        setLoading(false);
-        return;
-      }
-
-      // Log profile retrieval
-      await logger.info('User profile retrieved', { 
-        userId: result.user.uid,
-        role: userProfile.role 
-      });
-      
-      // Redirect based on role
-      if (userProfile.role === 'caregiver') {
-        navigate('/caregiver');
-      } else if (userProfile.role === 'doctor') {
-        navigate('/doctor');
-      } else if (userProfile.role === 'admin') {
-        navigate('/admin');
-      } else {
-        navigate('/elderly'); // Default for elderly
-      }
+      if (!userProfile) { setError('Account profile not found. Please contact support.'); setLoading(false); return; }
+      const roleRoutes: Record<string, string> = { caregiver: '/caregiver', doctor: '/doctor', admin: '/admin', elderly: '/elderly' };
+      navigate(roleRoutes[userProfile.role] || '/elderly');
     } catch (err: any) {
-      // Log unexpected error
-      await logger.error('Unexpected login error', { 
-        email: trimmedEmail, 
-        error: err.message 
-      });
       setError('An unexpected error occurred. Please try again.');
-    } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-900 via-purple-900 to-indigo-900 flex items-center justify-center p-4">
-      <Card className="w-full max-w-md bg-white/95 backdrop-blur shadow-2xl">
-        <CardHeader className="text-center">
-          <div className="flex justify-center mb-4">
-            <div className="p-3 bg-gradient-to-r from-blue-600 to-indigo-600 rounded-full">
-              <Pill className="h-8 w-8 text-white" />
-            </div>
+    <div className="min-h-screen bg-gradient-to-br from-blue-900 via-indigo-900 to-purple-900 flex items-center justify-center p-4">
+      <div className="absolute inset-0 overflow-hidden pointer-events-none">
+        <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-blue-500/10 rounded-full blur-3xl" />
+        <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-purple-500/10 rounded-full blur-3xl" />
+      </div>
+      <div className="relative w-full max-w-md">
+        <div className="text-center mb-8">
+          <div className="inline-flex items-center justify-center w-20 h-20 bg-white/10 backdrop-blur rounded-2xl mb-4 border border-white/20 shadow-xl">
+            <Pill className="h-10 w-10 text-white" />
           </div>
-          <CardTitle className="text-3xl font-bold">Welcome Back</CardTitle>
-          <p className="text-gray-600">Sign in to your CareDose+ account</p>
-        </CardHeader>
-        
-        <CardContent>
-          <form onSubmit={handleLogin} className="space-y-4">
-            {/* Email Field */}
-            <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
-              <div className="relative">
-                <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-                <Input
-                  id="email"
-                  type="email"
-                  value={email}
-                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEmail(e.target.value)}
-                  placeholder="Enter your email"
-                  required
-                  className="pl-10 border-2 focus:border-blue-500"
-                  disabled={loading}
-                />
+          <h1 className="text-4xl font-bold text-white tracking-tight">CareDose<span className="text-blue-300">+</span></h1>
+          <p className="text-blue-200/70 mt-2 text-sm">Smart Medication Management</p>
+        </div>
+
+        <Card className="bg-white shadow-2xl border-0 rounded-2xl overflow-hidden">
+          <CardHeader className="bg-gradient-to-r from-blue-600 to-indigo-600 px-8 py-6">
+            <h2 className="text-2xl font-bold text-white">Welcome Back</h2>
+            <p className="text-blue-100/80 text-sm mt-1">Sign in to your account</p>
+          </CardHeader>
+          <CardContent className="px-8 py-8">
+            <form onSubmit={handleLogin} className="space-y-5">
+              <div className="space-y-1.5">
+                <Label htmlFor="email" className="text-gray-700 font-semibold text-sm">Email Address</Label>
+                <div className="relative">
+                  <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                  <Input id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)}
+                    placeholder="you@example.com" required
+                    className="pl-10 h-12 border-gray-200 bg-gray-50 focus:bg-white focus:border-blue-500 rounded-xl text-sm"
+                    disabled={loading} autoComplete="email" />
+                </div>
               </div>
-            </div>
-            
-            {/* Password Field */}
-            <div className="space-y-2">
-              <Label htmlFor="password">Password</Label>
-              <div className="relative">
-                <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-                <Input
-                  id="password"
-                  type={showPassword ? "text" : "password"}
-                  value={password}
-                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setPassword(e.target.value)}
-                  placeholder="Enter your password"
-                  required
-                  className="pl-10 pr-10 border-2 focus:border-blue-500"
-                  disabled={loading}
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                >
-                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                </button>
+              <div className="space-y-1.5">
+                <Label htmlFor="password" className="text-gray-700 font-semibold text-sm">Password</Label>
+                <div className="relative">
+                  <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                  <Input id="password" type={showPassword ? 'text' : 'password'} value={password}
+                    onChange={(e) => setPassword(e.target.value)} placeholder="Enter your password" required
+                    className="pl-10 pr-12 h-12 border-gray-200 bg-gray-50 focus:bg-white focus:border-blue-500 rounded-xl text-sm"
+                    disabled={loading} autoComplete="current-password" />
+                  <button type="button" onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-3.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors" tabIndex={-1}>
+                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
               </div>
+              {successMessage && (
+                <Alert className="py-3 rounded-xl border-green-200 bg-green-50">
+                  <CheckCircle className="h-4 w-4 text-green-500" />
+                  <AlertDescription className="text-green-700 text-sm">{successMessage}</AlertDescription>
+                </Alert>
+              )}
+              {error && (
+                <Alert variant="destructive" className="py-3 rounded-xl border-red-200 bg-red-50">
+                  <AlertCircle className="h-4 w-4 text-red-500" />
+                  <AlertDescription className="text-red-700 text-sm">{error}</AlertDescription>
+                </Alert>
+              )}
+              {/* Sign In button - always blue gradient, never white */}
+              <button type="submit" disabled={loading}
+                className="w-full h-12 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-bold text-base rounded-xl shadow-lg shadow-blue-500/30 transition-all hover:shadow-xl hover:shadow-blue-500/40 hover:-translate-y-0.5 disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:translate-y-0 flex items-center justify-center gap-2">
+                {loading ? (
+                  <><span className="h-4 w-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />Signing in…</>
+                ) : 'Sign In'}
+              </button>
+            </form>
+            <div className="flex items-center gap-3 my-6">
+              <div className="flex-1 h-px bg-gray-200" />
+              <span className="text-xs text-gray-400 font-medium uppercase tracking-wider">New here?</span>
+              <div className="flex-1 h-px bg-gray-200" />
             </div>
-
-            {/* Submit Button */}
-            <Button type="submit" className="w-full" disabled={loading}>
-              {loading ? 'Signing in...' : 'Sign In'}
-            </Button>
-          </form>
-
-          {/* Error Alert */}
-          {error && (
-            <Alert variant="destructive" className="mt-4">
-              <AlertCircle className="h-4 w-4" />
-              <AlertDescription>{error}</AlertDescription>
-            </Alert>
-          )}
-
-          {/* Sign Up Link */}
-          <div className="mt-6 text-center">
-            <p className="text-gray-600">
-              Don't have an account?{' '}
-              <Link to="/signup" className="text-blue-600 hover:text-blue-800 font-semibold">
-                Sign up
-              </Link>
-            </p>
-          </div>
-
-          {/* Test Accounts (for development) */}
-          {process.env.NODE_ENV === 'development' && (
-            <div className="mt-6 p-4 bg-gray-50 rounded-lg border border-gray-200">
-              <p className="text-sm font-semibold text-gray-700 mb-2">Test Accounts:</p>
-              <div className="space-y-1 text-xs text-gray-600">
-                <p>Admin: admin@caredose.com / Admin@123</p>
-                <p>Elderly: elderly@caredose.com / Elderly@123</p>
-                <p>Caregiver: caregiver@caredose.com / Caregiver@123</p>
-                <p>Doctor: doctor@caredose.com / Doctor@123</p>
-              </div>
+            <Link to="/signup">
+              <button type="button"
+                className="w-full h-12 border-2 border-blue-200 bg-white text-blue-700 font-semibold text-sm rounded-xl hover:border-blue-400 hover:bg-blue-50 transition-all">
+                Create an Account
+              </button>
+            </Link>
+            <div className="flex items-center justify-center gap-5 mt-6 text-xs text-gray-400">
+              <span className="flex items-center gap-1.5"><Shield className="h-3.5 w-3.5 text-green-500" />Secure & Private</span>
+              <span className="h-3 w-px bg-gray-300" />
+              <span className="flex items-center gap-1.5"><Heart className="h-3.5 w-3.5 text-red-400" />Built for Care</span>
             </div>
-          )}
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      </div>
     </div>
   );
 };

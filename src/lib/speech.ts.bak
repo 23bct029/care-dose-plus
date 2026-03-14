@@ -1,8 +1,11 @@
-// src/lib/speech.ts - STABLE voice assistant with freeze prevention
+// src/lib/speech.ts - Stable voice assistant with proper reset after each command
 class SpeechService {
   private synthesis: SpeechSynthesis | null = null;
+  private recognition: any = null;
+  private isListening = false;
   private voices: SpeechSynthesisVoice[] = [];
   private preferredVoice: SpeechSynthesisVoice | null = null;
+  private listenTimeout: ReturnType<typeof setTimeout> | null = null;
 
   constructor() {
     if (typeof window !== 'undefined') {
@@ -40,14 +43,14 @@ class SpeechService {
         utterance.volume = 1;
         utterance.lang = 'en-US';
         if (this.preferredVoice) utterance.voice = this.preferredVoice;
-        const timeout = setTimeout(() => { resolve(); }, (text.length / 10) * 1000 + 3000);
-        utterance.onend = () => { clearTimeout(timeout); resolve(); };
-        utterance.onerror = () => { clearTimeout(timeout); resolve(); };
+        utterance.onend = () => resolve();
+        utterance.onerror = () => resolve();
         this.synthesis!.speak(utterance);
       }, 100);
     });
   }
 
+  // Always create a fresh recognition instance to prevent freezing
   private createFreshRecognition(): any {
     const SpeechRecognition = (window as any).webkitSpeechRecognition || (window as any).SpeechRecognition;
     if (!SpeechRecognition) return null;
@@ -63,21 +66,22 @@ class SpeechService {
     return new Promise((resolve) => {
       const rec = this.createFreshRecognition();
       if (!rec) { resolve('not_supported'); return; }
+
       let resolved = false;
-      let timer: ReturnType<typeof setTimeout> | null = null;
       const done = (result: string) => {
         if (resolved) return;
         resolved = true;
-        if (timer) clearTimeout(timer);
-        try { rec.stop(); } catch {}
+        this.isListening = false;
+        if (this.listenTimeout) { clearTimeout(this.listenTimeout); this.listenTimeout = null; }
         try { rec.abort(); } catch {}
         rec.onresult = null;
         rec.onerror = null;
         rec.onend = null;
-        rec.onnomatch = null;
-        setTimeout(() => resolve(result), 200);
+        resolve(result);
       };
-      timer = setTimeout(() => done('timeout'), timeoutMs);
+
+      this.listenTimeout = setTimeout(() => done('timeout'), timeoutMs);
+
       rec.onresult = (event: any) => {
         const results: string[] = [];
         for (let i = 0; i < event.results.length; i++) {
@@ -85,25 +89,16 @@ class SpeechService {
         }
         done(results.join(' '));
       };
-      rec.onerror = (event: any) => {
-        if (event.error === 'not-allowed') done('permission_denied');
-        else if (event.error === 'no-speech') done('timeout');
-        else done('error');
-      };
+      rec.onerror = (event: any) => done(event.error === 'no-speech' ? 'timeout' : 'error');
       rec.onend = () => { if (!resolved) done('timeout'); };
-      rec.onnomatch = () => done('timeout');
-      try { rec.start(); } catch (e) { done('error'); }
-    });
-  }
 
-  async askQuestion(prompt: string, timeoutMs: number = 8000): Promise<{ text: string; error?: string }> {
-    await this.speak(prompt);
-    await new Promise(r => setTimeout(r, 400));
-    const result = await this.listenForResponse(timeoutMs);
-    if (result === 'not_supported') return { text: '', error: 'Speech recognition not supported in this browser.' };
-    if (result === 'permission_denied') return { text: '', error: 'Microphone permission denied.' };
-    if (result === 'timeout' || result === 'error') return { text: '', error: 'I did not catch that.' };
-    return { text: result };
+      try {
+        this.isListening = true;
+        rec.start();
+      } catch (e) {
+        done('error');
+      }
+    });
   }
 
   processQuery(query: string): string {
@@ -118,7 +113,7 @@ class SpeechService {
     if (lq.includes('call 911') || lq.includes('call ambulance')) return 'call_911';
     if (lq.includes('next medicine') || lq.includes('next dose') || lq.includes('next pill')) return 'next_medicine';
     if (lq.includes('take medicine') || lq.includes('took my') || lq.includes('mark taken') || lq.includes('i took')) return 'mark_taken';
-    if (lq.includes('skip') && !lq.includes('skip reminder')) return 'mark_skipped';
+    if (lq.includes('skip') || lq.includes('skipped')) return 'mark_skipped';
     if (lq.includes('missed') && (lq.includes('dose') || lq.includes('medicine'))) return 'missed_medicines';
     if (lq.includes('all medicines') || lq.includes('my medicines') || lq.includes('medicine list') || lq.includes('list medicines')) return 'list_medicines';
     if (lq.includes('medicine') || lq.includes('pill') || lq.includes('tablet') || lq.includes('medication')) return 'today_schedule';
@@ -152,7 +147,7 @@ class SpeechService {
     const firstName = context.profileName?.split(' ')[0] || 'there';
 
     switch (intent) {
-      case 'greeting': return `${greetingWord} ${firstName}! I'm your health assistant. How can I help you today?`;
+      case 'greeting': return `${greetingWord} ${firstName}! I'm your health assistant. I can help with your medicines, appointments, caregivers, wellness score, and more. How can I help you today?`;
       case 'thanks': return `You're welcome, ${firstName}! Is there anything else I can help you with?`;
       case 'goodbye': return `Take care, ${firstName}! Remember to take your medicines on time. Goodbye!`;
       case 'how_are_you': return `I'm doing great and ready to help you, ${firstName}! How are you feeling today?`;
@@ -177,7 +172,7 @@ class SpeechService {
       case 'missed_medicines':
         if (context.missedDoses?.length > 0) {
           const missed = context.medicines?.filter((m: any) => context.missedDoses.includes(m.id)).map((m: any) => m.name).join(', ') || 'some doses';
-          return `You have ${context.missedDoses.length} missed dose(s) today: ${missed}. Please take them if not too late, or contact your doctor.`;
+          return `You have ${context.missedDoses.length} missed dose(s) today: ${missed}. Please take them if it's not too late, or contact your doctor.`;
         }
         return "You haven't missed any medicines today. Great job!";
       case 'read_schedule':
@@ -207,43 +202,43 @@ class SpeechService {
           const names = context.caregivers.map((c: any) => c.name).join(', ');
           return `You have ${context.caregivers.length} caregiver${context.caregivers.length > 1 ? 's' : ''}: ${names}. Say "call caregiver" to call them.`;
         }
-        return 'You have no caregivers connected yet.';
+        return 'You have no caregivers connected yet. You can invite one from the connections section.';
       case 'call_caregiver':
         if (context.caregivers?.length > 0) return `CALL_CAREGIVER:${context.caregivers[0].name}`;
         return 'You have no caregivers connected to call.';
       case 'call_doctor': return 'CALL_DOCTOR';
       case 'call_911': return 'CALL_911';
       case 'mark_taken':
-        if (context.nextDose) return `MARK_TAKEN:${context.nextDose.name}`;
+        if (context.nextDose) return `I'll mark ${context.nextDose.name} as taken. Well done, ${firstName}! Stay healthy! MARK_TAKEN`;
         return 'Which medicine did you take? Please use the medicine list to mark it.';
       case 'mark_skipped':
-        if (context.nextDose) return `MARK_SKIPPED:${context.nextDose.name}`;
+        if (context.nextDose) return `I'll mark ${context.nextDose.name} as skipped. Please contact your doctor if you have concerns about missing this dose. MARK_SKIPPED`;
         return 'Which medicine did you skip? Please check your medicine list.';
       case 'wellness_score': {
         const score = context.wellnessScore || 0;
         const level = score >= 80 ? 'excellent' : score >= 60 ? 'good' : score >= 40 ? 'fair' : 'needs attention';
-        return `Your wellness score is ${score} out of 100, which is ${level}.`;
+        return `Your wellness score is ${score} out of 100, which is ${level}. ${score < 80 ? 'Keep taking your medicines on time to improve your score.' : 'Keep up the great work!'}`;
       }
       case 'adherence_rate': {
         const rate = context.adherenceRate || 0;
-        return `Your medicine adherence rate is ${rate}%. ${rate >= 90 ? 'Excellent!' : rate >= 70 ? 'Good job. Try to improve.' : 'Needs improvement. Please try not to miss doses.'}`;
+        return `Your 30-day medicine adherence rate is ${rate}%. ${rate >= 90 ? 'Excellent! You are very consistent.' : rate >= 70 ? 'Good job. Try to take all your medicines on time.' : 'Your adherence needs improvement. Please try not to miss doses.'}`;
       }
-      case 'refill_reminder': return "Please contact your doctor or pharmacy soon for a refill.";
+      case 'refill_reminder': return "I'll note that you need a refill. Please contact your doctor or pharmacy soon. You can also ask your caregiver to help arrange a refill.";
       case 'emergency': return 'EMERGENCY_MODAL';
       case 'emergency_fall': return 'EMERGENCY_FALL';
       case 'emergency_pain': return 'EMERGENCY_PAIN';
       case 'emergency_confusion': return 'EMERGENCY_CONFUSION';
       case 'current_time': return `The current time is ${new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}.`;
       case 'current_date': return `Today is ${new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}.`;
-      case 'health_tip_water': return 'Try to drink at least 6 to 8 glasses of water daily. Hydration helps your medicines work better!';
-      case 'health_tip_bp': return 'To manage blood pressure: take your medicines regularly, reduce salt intake, and exercise gently.';
-      case 'health_tip_sugar': return 'For blood sugar: take your medicines on time, eat regular balanced meals, and avoid sugary drinks.';
-      case 'health_tip_exercise': return 'Light exercise like walking for 20 to 30 minutes daily is great for your health.';
-      case 'health_tip_sleep': return 'Try to sleep 7 to 8 hours. Keep a regular sleep schedule for better health.';
-      case 'set_reminder': return "Your medicine reminders are set automatically. I will notify you when it is time.";
-      case 'side_effects': return "Please ask your doctor or pharmacist about potential side effects of your specific medicines.";
-      case 'help': return 'I can help with: medicines, next dose, appointments, wellness score, caregivers, and emergencies. Just ask!';
-      default: return "I'm here to help! Ask me about your medicines, appointments, or say \"help\" to hear all my commands.";
+      case 'health_tip_water': return 'Staying hydrated is very important. Try to drink at least 6 to 8 glasses of water daily. Proper hydration helps your medicines work better too!';
+      case 'health_tip_bp': return 'To manage blood pressure, take your medicines regularly, reduce salt intake, exercise gently, and try to reduce stress. Always consult your doctor before changing your routine.';
+      case 'health_tip_sugar': return 'For blood sugar management, take your medicines on time, eat regular balanced meals, avoid sugary drinks, and check your blood sugar as your doctor recommends.';
+      case 'health_tip_exercise': return 'Light exercise like walking for 20 to 30 minutes daily is great for your health. Always check with your doctor before starting any new exercise routine.';
+      case 'health_tip_sleep': return 'Good sleep is essential for health. Try to sleep 7 to 8 hours. Keep a regular sleep schedule, avoid screens before bed, and take your evening medicines at the right time.';
+      case 'set_reminder': return "Your medicine reminders are set automatically. I will notify you and speak aloud when it's time to take each medicine. Make sure browser notifications are enabled.";
+      case 'side_effects': return "I don't have side effect information. Please ask your doctor or pharmacist about potential side effects of your specific medicines.";
+      case 'help': return 'Here are some things I can help with: Ask about your medicines, next dose, or schedule. Check upcoming appointments. Get your wellness score or adherence rate. Learn about your caregivers. Get health tips. Or say "emergency" if you need urgent help.';
+      default: return "I'm here to help! You can ask me about your medicines, appointments, wellness score, caregivers, or say \"help\" to hear all my commands.";
     }
   }
 
@@ -259,9 +254,10 @@ class SpeechService {
       await this.speak("I'll remind you again in 10 minutes.");
       return 'snooze';
     } else if (response.includes('skip')) {
-      await this.speak("I'll mark this dose as skipped.");
+      await this.speak("I'll mark this dose as skipped. Please contact your doctor if you have concerns.");
       return 'skip';
     }
+    await this.speak("I didn't catch that. Please use the app to mark your medicine.");
     return 'no-response';
   }
 
@@ -270,6 +266,12 @@ class SpeechService {
   }
 
   stopSpeaking() { if (this.synthesis) this.synthesis.cancel(); }
+
+  stopListening() {
+    this.isListening = false;
+    if (this.listenTimeout) { clearTimeout(this.listenTimeout); this.listenTimeout = null; }
+  }
+
   isSpeaking(): boolean { return this.synthesis ? this.synthesis.speaking : false; }
 }
 

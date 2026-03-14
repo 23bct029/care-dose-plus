@@ -1,3 +1,4 @@
+import React from 'react';
 import { auth, db } from '@/lib/firebase';
 import { 
   collection, 
@@ -9,8 +10,8 @@ import {
   doc,
   getDocs,
   serverTimestamp,
-  orderBy,
-  setDoc  // Added missing import
+  setDoc,
+  deleteDoc
 } from 'firebase/firestore';
 import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
@@ -19,6 +20,12 @@ import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { 
   Users, 
   UserPlus, 
@@ -26,9 +33,12 @@ import {
   X, 
   Clock, 
   Bell,
-  MessageSquare,
-  Phone,
-  Mail
+  Mail,
+  Trash2,
+  AlertTriangle,
+  CheckCircle2,
+  Send,
+  UserCheck
 } from 'lucide-react';
 
 interface Connection {
@@ -81,69 +91,54 @@ const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({ userRole }) => {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [activeTab, setActiveTab] = useState('connections');
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [confirmDeleteType, setConfirmDeleteType] = useState<'connection' | 'invitation'>('connection');
 
-  // Real-time listeners
   useEffect(() => {
     if (!auth.currentUser) return;
 
-    // Listen to received invitations
     const receivedQuery = query(
       collection(db, 'invitations'),
       where('toUserId', '==', auth.currentUser.uid),
       where('status', '==', 'pending')
     );
-    
     const unsubscribeReceived = onSnapshot(receivedQuery, (snapshot) => {
-      const received = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      })) as Invitation[];
+      const received = snapshot.docs.map(d => ({ id: d.id, ...d.data() })) as Invitation[];
       setInvitations(prev => ({ ...prev, received }));
     });
 
-    // Listen to sent invitations
     const sentQuery = query(
       collection(db, 'invitations'),
       where('fromUserId', '==', auth.currentUser.uid),
       where('status', '==', 'pending')
     );
-    
     const unsubscribeSent = onSnapshot(sentQuery, (snapshot) => {
-      const sent = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      })) as Invitation[];
+      const sent = snapshot.docs.map(d => ({ id: d.id, ...d.data() })) as Invitation[];
       setInvitations(prev => ({ ...prev, sent }));
     });
 
-    // Listen to active connections
     const connectionsQuery = query(
       collection(db, 'connections'),
       where('users', 'array-contains', auth.currentUser.uid),
       where('status', '==', 'active')
     );
-    
     const unsubscribeConnections = onSnapshot(connectionsQuery, (snapshot) => {
-      const connectionsData = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      })) as Connection[];
+      const connectionsData = snapshot.docs.map(d => ({ id: d.id, ...d.data() })) as Connection[];
       setConnections(connectionsData);
     });
 
-    // Listen to notifications
     const notificationsQuery = query(
       collection(db, 'notifications'),
       where('userId', '==', auth.currentUser.uid),
-      where('read', '==', false),
-      orderBy('createdAt', 'desc')
+      where('read', '==', false)
     );
-    
     const unsubscribeNotifications = onSnapshot(notificationsQuery, (snapshot) => {
-      const notificationsData = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      })) as Notification[];
+      const notificationsData = snapshot.docs.map(d => ({ id: d.id, ...d.data() })) as Notification[];
+      notificationsData.sort((a: any, b: any) => {
+        const at = a.createdAt?.toMillis?.() || 0;
+        const bt = b.createdAt?.toMillis?.() || 0;
+        return bt - at;
+      });
       setNotifications(notificationsData);
     });
 
@@ -164,42 +159,30 @@ const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({ userRole }) => {
     try {
       if (!auth.currentUser) throw new Error('You must be logged in');
 
-      // Find user by email
-      const usersQuery = query(
-        collection(db, 'users'),
-        where('email', '==', email)
-      );
+      const trimmedEmail = email.trim().toLowerCase();
+      if (trimmedEmail === auth.currentUser.email?.toLowerCase()) {
+        throw new Error('You cannot connect with yourself');
+      }
+
+      const usersQuery = query(collection(db, 'users'), where('email', '==', trimmedEmail));
       const usersSnapshot = await getDocs(usersQuery);
       
       if (usersSnapshot.empty) {
-        throw new Error('User with this email not found');
+        throw new Error('No user found with this email address');
       }
 
       const targetUser = usersSnapshot.docs[0];
       const targetUserId = targetUser.id;
       const targetUserData = targetUser.data();
 
-      // Check if already connected
-      const existingConnection = connections.find(conn => 
-        conn.users.includes(targetUserId)
-      );
-      
-      if (existingConnection) {
-        throw new Error('Already connected with this user');
-      }
+      const alreadyConnected = connections.some(conn => conn.users.includes(targetUserId));
+      if (alreadyConnected) throw new Error('You are already connected with this user');
 
-      // Check for existing pending invitation
-      const existingInvite = invitations.sent.find(inv => 
-        inv.toUserId === targetUserId
-      );
-      
-      if (existingInvite) {
-        throw new Error('Invitation already sent to this user');
-      }
+      const alreadySent = invitations.sent.some(inv => inv.toUserId === targetUserId);
+      if (alreadySent) throw new Error('You already have a pending invitation to this user');
 
-      // Create invitation
-      const relationship = userRole === 'elderly' ? 'elderly-caregiver' 
-        : userRole === 'caregiver' ? 'caregiver-elderly' 
+      const relationship = userRole === 'elderly' ? 'elderly-caregiver'
+        : userRole === 'caregiver' ? 'caregiver-elderly'
         : 'doctor-patient';
 
       await addDoc(collection(db, 'invitations'), {
@@ -207,14 +190,13 @@ const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({ userRole }) => {
         fromUserEmail: auth.currentUser.email,
         fromUserName: auth.currentUser.displayName || auth.currentUser.email,
         toUserId: targetUserId,
-        toEmail: email,
-        toUserName: targetUserData.name || email,
+        toEmail: trimmedEmail,
+        toUserName: targetUserData.name || trimmedEmail,
         relationship,
         status: 'pending',
         createdAt: serverTimestamp()
       });
 
-      // Create notification for recipient
       await addDoc(collection(db, 'notifications'), {
         userId: targetUserId,
         type: 'invitation',
@@ -225,7 +207,7 @@ const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({ userRole }) => {
         createdAt: serverTimestamp()
       });
 
-      setSuccess(`Invitation sent to ${email}`);
+      setSuccess(`Invitation sent to ${trimmedEmail}`);
       setEmail('');
     } catch (err: any) {
       setError(err.message);
@@ -237,16 +219,10 @@ const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({ userRole }) => {
   const handleAccept = async (invitationId: string) => {
     try {
       const invitationRef = doc(db, 'invitations', invitationId);
-      await updateDoc(invitationRef, {
-        status: 'accepted',
-        acceptedAt: serverTimestamp()
-      });
+      await updateDoc(invitationRef, { status: 'accepted', acceptedAt: serverTimestamp() });
 
-      // Get invitation data
       const invitation = invitations.received.find(i => i.id === invitationId);
-      
       if (invitation) {
-        // Create connection
         const connectionId = [invitation.fromUserId, invitation.toUserId].sort().join('_');
         await setDoc(doc(db, 'connections', connectionId), {
           users: [invitation.fromUserId, invitation.toUserId],
@@ -257,7 +233,6 @@ const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({ userRole }) => {
           initiatedBy: invitation.fromUserId
         });
 
-        // Create notification for sender
         await addDoc(collection(db, 'notifications'), {
           userId: invitation.fromUserId,
           type: 'invitation_accepted',
@@ -268,8 +243,7 @@ const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({ userRole }) => {
           createdAt: serverTimestamp()
         });
       }
-
-      setSuccess('Invitation accepted!');
+      setSuccess('Connection established!');
     } catch (err: any) {
       setError(err.message);
     }
@@ -277,30 +251,73 @@ const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({ userRole }) => {
 
   const handleReject = async (invitationId: string) => {
     try {
-      const invitationRef = doc(db, 'invitations', invitationId);
-      await updateDoc(invitationRef, {
+      await updateDoc(doc(db, 'invitations', invitationId), {
         status: 'rejected',
         rejectedAt: serverTimestamp()
       });
-      setSuccess('Invitation rejected');
+      setSuccess('Invitation declined');
     } catch (err: any) {
       setError(err.message);
     }
   };
 
+  const handleDeleteConnection = async (connectionId: string) => {
+    try {
+      await deleteDoc(doc(db, 'connections', connectionId));
+      setSuccess('Connection removed');
+      setConfirmDeleteId(null);
+    } catch (err: any) {
+      setError('Failed to remove connection');
+    }
+  };
+
+  const handleCancelInvitation = async (invitationId: string) => {
+    try {
+      await updateDoc(doc(db, 'invitations', invitationId), {
+        status: 'rejected',
+        rejectedAt: serverTimestamp()
+      });
+      setSuccess('Invitation cancelled');
+      setConfirmDeleteId(null);
+    } catch (err: any) {
+      setError('Failed to cancel invitation');
+    }
+  };
+
   const handleMarkNotificationRead = async (notificationId: string) => {
     try {
-      const notificationRef = doc(db, 'notifications', notificationId);
-      await updateDoc(notificationRef, { read: true });
+      await updateDoc(doc(db, 'notifications', notificationId), { read: true });
     } catch (err) {
       console.error('Error marking notification as read:', err);
     }
   };
 
+  const handleMarkAllRead = async () => {
+    try {
+      await Promise.all(notifications.map(n =>
+        updateDoc(doc(db, 'notifications', n.id), { read: true })
+      ));
+    } catch (err) {
+      console.error('Error marking all notifications as read:', err);
+    }
+  };
+
   const getOtherUser = (connection: Connection) => {
     const otherUserId = connection.users.find(id => id !== auth.currentUser?.uid);
-    const otherEmail = connection.userEmails.find(email => email !== auth.currentUser?.email);
+    const otherEmail = connection.userEmails.find(e => e !== auth.currentUser?.email);
     return { id: otherUserId, email: otherEmail };
+  };
+
+  const getRoleLabel = () => {
+    if (userRole === 'doctor') return 'patient';
+    if (userRole === 'caregiver') return 'elderly person';
+    return 'caregiver or doctor';
+  };
+
+  const getRelationshipLabel = (relationship: string) => {
+    if (relationship.includes('doctor')) return 'Doctor–Patient';
+    if (relationship.includes('caregiver')) return 'Caregiver–Elderly';
+    return relationship;
   };
 
   if (!auth.currentUser) {
@@ -315,192 +332,306 @@ const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({ userRole }) => {
   }
 
   return (
-    <Card className="w-full max-w-4xl mx-auto">
-      <CardHeader>
-        <div className="flex items-center justify-between">
-          <CardTitle className="flex items-center gap-2">
-            <Users className="h-5 w-5" />
-            Connections
-          </CardTitle>
-          {notifications.length > 0 && (
-            <Badge className="bg-red-500 animate-pulse">
-              {notifications.length} new
-            </Badge>
-          )}
-        </div>
-      </CardHeader>
-      
-      <CardContent>
-        <Tabs value={activeTab} onValueChange={setActiveTab}>
-          <TabsList className="grid w-full grid-cols-4">
-            <TabsTrigger value="connections">
-              Connections ({connections.length})
-            </TabsTrigger>
-            <TabsTrigger value="received">
-              Received ({invitations.received.length})
-            </TabsTrigger>
-            <TabsTrigger value="sent">
-              Sent ({invitations.sent.length})
-            </TabsTrigger>
-            <TabsTrigger value="notifications" className="relative">
-              Notifications
+    <>
+      <Card className="w-full max-w-3xl mx-auto shadow-xl">
+        <CardHeader className="pb-3 border-b">
+          <div className="flex items-center justify-between">
+            <CardTitle className="flex items-center gap-2 text-xl">
+              <Users className="h-5 w-5 text-blue-600" />
+              Manage Connections
+            </CardTitle>
+            <div className="flex items-center gap-2">
               {notifications.length > 0 && (
-                <span className="absolute -top-1 -right-1 h-4 w-4 bg-red-500 rounded-full text-[10px] text-white flex items-center justify-center">
-                  {notifications.length}
-                </span>
+                <Badge className="bg-red-500 text-white animate-pulse">
+                  {notifications.length} new
+                </Badge>
               )}
-            </TabsTrigger>
-          </TabsList>
+              <Badge variant="outline" className="text-gray-600">
+                {connections.length} active
+              </Badge>
+            </div>
+          </div>
+        </CardHeader>
 
-          {/* Send Invitation Form - Shown in all tabs */}
-          <div className="mt-4 mb-6 p-4 bg-gray-50 rounded-lg">
+        <CardContent className="p-4">
+          {/* Send Invitation Form */}
+          <div className="mb-5 p-4 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl border border-blue-100">
+            <p className="text-sm font-semibold text-blue-800 mb-3 flex items-center gap-2">
+              <UserPlus className="h-4 w-4" />
+              Invite a {getRoleLabel()}
+            </p>
             <form onSubmit={handleSendInvitation} className="flex gap-2">
               <Input
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder={`Enter ${userRole === 'doctor' ? 'patient' : userRole === 'caregiver' ? 'elderly' : 'caregiver'} email`}
-                className="flex-1"
+                placeholder={`Enter ${getRoleLabel()}'s email address`}
+                className="flex-1 bg-white border-blue-200 focus:border-blue-400"
                 required
               />
-              <Button type="submit" disabled={loading}>
-                <UserPlus className="h-4 w-4 mr-2" />
-                {loading ? 'Sending...' : 'Invite'}
+              <Button
+                type="submit"
+                disabled={loading}
+                className="bg-blue-600 hover:bg-blue-700 text-white shrink-0"
+              >
+                <Send className="h-4 w-4 mr-2" />
+                {loading ? 'Sending…' : 'Send'}
               </Button>
             </form>
-            {error && <p className="text-red-500 text-sm mt-2">{error}</p>}
-            {success && <p className="text-green-500 text-sm mt-2">{success}</p>}
+            {error && (
+              <p className="text-red-600 text-sm mt-2 flex items-center gap-1">
+                <AlertTriangle className="h-3.5 w-3.5" /> {error}
+              </p>
+            )}
+            {success && (
+              <p className="text-green-600 text-sm mt-2 flex items-center gap-1">
+                <CheckCircle2 className="h-3.5 w-3.5" /> {success}
+              </p>
+            )}
           </div>
 
-          {/* Connections Tab */}
-          <TabsContent value="connections" className="space-y-4">
-            {connections.length === 0 ? (
-              <div className="text-center py-8">
-                <Users className="h-12 w-12 text-gray-300 mx-auto mb-4" />
-                <p className="text-gray-500">No connections yet</p>
-                <p className="text-sm text-gray-400 mt-2">
-                  Invite someone to get started
-                </p>
-              </div>
-            ) : (
-              connections.map(conn => {
-                const other = getOtherUser(conn);
-                return (
-                  <div key={conn.id} className="flex items-center justify-between p-4 border rounded-lg hover:bg-gray-50">
+          <Tabs value={activeTab} onValueChange={(v) => { setActiveTab(v); setError(''); setSuccess(''); }}>
+            <TabsList className="w-full bg-gray-100 p-1 rounded-lg">
+              <TabsTrigger value="connections" className="flex-1 rounded-md text-sm py-2 data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-blue-700 font-medium">
+                <UserCheck className="h-3.5 w-3.5 mr-1.5" />
+                Active ({connections.length})
+              </TabsTrigger>
+              <TabsTrigger value="received" className="flex-1 rounded-md text-sm py-2 data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-green-700 font-medium">
+                <Clock className="h-3.5 w-3.5 mr-1.5" />
+                Received
+                {invitations.received.length > 0 && (
+                  <span className="ml-1.5 bg-red-500 text-white text-[10px] rounded-full px-1.5 py-0.5">{invitations.received.length}</span>
+                )}
+              </TabsTrigger>
+              <TabsTrigger value="sent" className="flex-1 rounded-md text-sm py-2 data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-purple-700 font-medium">
+                <Send className="h-3.5 w-3.5 mr-1.5" />
+                Sent ({invitations.sent.length})
+              </TabsTrigger>
+              <TabsTrigger value="notifications" className="flex-1 rounded-md text-sm py-2 data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-orange-700 font-medium">
+                <Bell className="h-3.5 w-3.5 mr-1.5" />
+                Alerts
+                {notifications.length > 0 && (
+                  <span className="ml-1.5 bg-red-500 text-white text-[10px] rounded-full px-1.5 py-0.5">{notifications.length}</span>
+                )}
+              </TabsTrigger>
+            </TabsList>
+
+            {/* Active Connections */}
+            <TabsContent value="connections" className="mt-4 space-y-3">
+              {connections.length === 0 ? (
+                <div className="text-center py-10">
+                  <Users className="h-14 w-14 text-gray-200 mx-auto mb-3" />
+                  <p className="text-gray-500 font-medium">No active connections</p>
+                  <p className="text-sm text-gray-400 mt-1">Send an invitation above to get started</p>
+                </div>
+              ) : (
+                connections.map(conn => {
+                  const other = getOtherUser(conn);
+                  const initial = other.email?.[0]?.toUpperCase() || '?';
+                  return (
+                    <div key={conn.id} className="flex items-center justify-between p-4 border border-gray-200 rounded-xl hover:bg-gray-50 transition-all group">
+                      <div className="flex items-center gap-3">
+                        <Avatar className="h-10 w-10">
+                          <AvatarFallback className="bg-gradient-to-br from-blue-500 to-indigo-600 text-white font-semibold">
+                            {initial}
+                          </AvatarFallback>
+                        </Avatar>
+                        <div>
+                          <p className="font-semibold text-gray-800">{other.email}</p>
+                          <div className="flex items-center gap-2 mt-0.5">
+                            <span className="text-xs text-green-600 font-medium flex items-center gap-1">
+                              <span className="w-1.5 h-1.5 bg-green-500 rounded-full inline-block"></span>
+                              Connected
+                            </span>
+                            <span className="text-xs text-gray-400">• {getRelationshipLabel(conn.relationship)}</span>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex gap-2 items-center">
+                        <a href={`mailto:${other.email}`}>
+                          <Button variant="ghost" size="sm" className="h-8 w-8 p-0 hover:bg-blue-50 hover:text-blue-600">
+                            <Mail className="h-4 w-4" />
+                          </Button>
+                        </a>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-8 w-8 p-0 text-red-400 hover:text-red-600 hover:bg-red-50 opacity-0 group-hover:opacity-100 transition-opacity"
+                          onClick={() => { setConfirmDeleteId(conn.id); setConfirmDeleteType('connection'); }}
+                          title="Remove connection"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </TabsContent>
+
+            {/* Received Invitations */}
+            <TabsContent value="received" className="mt-4 space-y-3">
+              {invitations.received.length === 0 ? (
+                <div className="text-center py-10">
+                  <Clock className="h-14 w-14 text-gray-200 mx-auto mb-3" />
+                  <p className="text-gray-500 font-medium">No pending invitations</p>
+                  <p className="text-sm text-gray-400 mt-1">Invitations sent to you will appear here</p>
+                </div>
+              ) : (
+                invitations.received.map(inv => (
+                  <div key={inv.id} className="p-4 border border-green-200 bg-green-50 rounded-xl">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex items-start gap-3">
+                        <Avatar className="h-10 w-10 shrink-0">
+                          <AvatarFallback className="bg-gradient-to-br from-green-500 to-emerald-600 text-white font-semibold">
+                            {inv.fromUserName?.[0]?.toUpperCase() || '?'}
+                          </AvatarFallback>
+                        </Avatar>
+                        <div>
+                          <p className="font-semibold text-gray-800">{inv.fromUserName}</p>
+                          <p className="text-sm text-gray-500">{inv.fromUserEmail}</p>
+                          <span className="text-xs text-green-700 mt-1 bg-green-100 px-2 py-0.5 rounded-full inline-block">
+                            {getRelationshipLabel(inv.relationship)}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="flex gap-2 shrink-0">
+                        <Button
+                          size="sm"
+                          className="bg-green-600 hover:bg-green-700 text-white"
+                          onClick={() => handleAccept(inv.id)}
+                        >
+                          <Check className="h-4 w-4 mr-1" />
+                          Accept
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="text-red-600 border-red-200 hover:bg-red-50"
+                          onClick={() => handleReject(inv.id)}
+                        >
+                          <X className="h-4 w-4 mr-1" />
+                          Decline
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )}
+            </TabsContent>
+
+            {/* Sent Invitations */}
+            <TabsContent value="sent" className="mt-4 space-y-3">
+              {invitations.sent.length === 0 ? (
+                <div className="text-center py-10">
+                  <Send className="h-14 w-14 text-gray-200 mx-auto mb-3" />
+                  <p className="text-gray-500 font-medium">No pending sent invitations</p>
+                  <p className="text-sm text-gray-400 mt-1">Invitations you send will appear here</p>
+                </div>
+              ) : (
+                invitations.sent.map(inv => (
+                  <div key={inv.id} className="flex items-center justify-between p-4 border border-gray-200 rounded-xl group hover:bg-gray-50">
                     <div className="flex items-center gap-3">
-                      <Avatar>
-                        <AvatarFallback className="bg-blue-100 text-blue-600">
-                          {other.email?.[0]?.toUpperCase()}
+                      <Avatar className="h-10 w-10">
+                        <AvatarFallback className="bg-gradient-to-br from-purple-500 to-indigo-600 text-white font-semibold">
+                          {(inv.toUserName || inv.toEmail)?.[0]?.toUpperCase() || '?'}
                         </AvatarFallback>
                       </Avatar>
                       <div>
-                        <p className="font-medium">{other.email}</p>
-                        <p className="text-xs text-green-600">Connected</p>
+                        <p className="font-semibold text-gray-800">{inv.toUserName || inv.toEmail}</p>
+                        <p className="text-sm text-gray-500">{inv.toEmail}</p>
+                        <Badge variant="outline" className="mt-1 text-xs border-yellow-300 text-yellow-700 bg-yellow-50">
+                          <Clock className="h-3 w-3 mr-1" /> Awaiting response
+                        </Badge>
                       </div>
                     </div>
-                    <div className="flex gap-2">
-                      <Button variant="ghost" size="sm">
-                        <MessageSquare className="h-4 w-4" />
-                      </Button>
-                      <Button variant="ghost" size="sm">
-                        <Phone className="h-4 w-4" />
-                      </Button>
-                      <Button variant="ghost" size="sm">
-                        <Mail className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </div>
-                );
-              })
-            )}
-          </TabsContent>
-
-          {/* Received Invitations Tab */}
-          <TabsContent value="received" className="space-y-4">
-            {invitations.received.length === 0 ? (
-              <div className="text-center py-8">
-                <Clock className="h-12 w-12 text-gray-300 mx-auto mb-4" />
-                <p className="text-gray-500">No pending invitations</p>
-              </div>
-            ) : (
-              invitations.received.map(inv => (
-                <div key={inv.id} className="flex items-center justify-between p-4 border rounded-lg">
-                  <div>
-                    <p className="font-medium">{inv.fromUserName}</p>
-                    <p className="text-sm text-gray-600">{inv.fromUserEmail}</p>
-                    <p className="text-xs text-gray-500">
-                      Wants to connect as {inv.relationship}
-                    </p>
-                  </div>
-                  <div className="flex gap-2">
-                    <Button 
-                      size="sm" 
-                      className="bg-green-600 hover:bg-green-700"
-                      onClick={() => handleAccept(inv.id)}
-                    >
-                      <Check className="h-4 w-4 mr-1" />
-                      Accept
-                    </Button>
-                    <Button 
-                      size="sm" 
-                      variant="outline"
-                      className="text-red-600 border-red-200 hover:bg-red-50"
-                      onClick={() => handleReject(inv.id)}
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="text-red-400 hover:text-red-600 hover:bg-red-50 opacity-0 group-hover:opacity-100 transition-opacity"
+                      onClick={() => { setConfirmDeleteId(inv.id); setConfirmDeleteType('invitation'); }}
+                      title="Cancel invitation"
                     >
                       <X className="h-4 w-4 mr-1" />
-                      Reject
+                      Cancel
                     </Button>
                   </div>
-                </div>
-              ))
-            )}
-          </TabsContent>
+                ))
+              )}
+            </TabsContent>
 
-          {/* Sent Invitations Tab */}
-          <TabsContent value="sent" className="space-y-4">
-            {invitations.sent.length === 0 ? (
-              <div className="text-center py-8">
-                <Clock className="h-12 w-12 text-gray-300 mx-auto mb-4" />
-                <p className="text-gray-500">No pending invitations sent</p>
-              </div>
-            ) : (
-              invitations.sent.map(inv => (
-                <div key={inv.id} className="p-4 border rounded-lg">
-                  <p className="font-medium">{inv.toUserName || inv.toEmail}</p>
-                  <p className="text-sm text-gray-600">{inv.toEmail}</p>
-                  <Badge variant="outline" className="mt-2">
-                    Pending
-                  </Badge>
+            {/* Notifications */}
+            <TabsContent value="notifications" className="mt-4 space-y-3">
+              {notifications.length > 0 && (
+                <div className="flex justify-end">
+                  <Button variant="ghost" size="sm" className="text-blue-600 text-xs" onClick={handleMarkAllRead}>
+                    Mark all as read
+                  </Button>
                 </div>
-              ))
-            )}
-          </TabsContent>
+              )}
+              {notifications.length === 0 ? (
+                <div className="text-center py-10">
+                  <Bell className="h-14 w-14 text-gray-200 mx-auto mb-3" />
+                  <p className="text-gray-500 font-medium">All caught up!</p>
+                  <p className="text-sm text-gray-400 mt-1">No new notifications</p>
+                </div>
+              ) : (
+                notifications.map(notif => (
+                  <div
+                    key={notif.id}
+                    className="p-4 bg-blue-50 border border-blue-200 rounded-xl cursor-pointer hover:bg-blue-100 transition-all flex items-start gap-3"
+                    onClick={() => handleMarkNotificationRead(notif.id)}
+                  >
+                    <Bell className="h-5 w-5 text-blue-500 mt-0.5 shrink-0" />
+                    <div className="flex-1">
+                      <p className="text-sm text-gray-800">{notif.message}</p>
+                      <p className="text-xs text-blue-500 mt-1">Click to dismiss</p>
+                    </div>
+                  </div>
+                ))
+              )}
+            </TabsContent>
+          </Tabs>
+        </CardContent>
+      </Card>
 
-          {/* Notifications Tab */}
-          <TabsContent value="notifications" className="space-y-4">
-            {notifications.length === 0 ? (
-              <div className="text-center py-8">
-                <Bell className="h-12 w-12 text-gray-300 mx-auto mb-4" />
-                <p className="text-gray-500">No new notifications</p>
-              </div>
-            ) : (
-              notifications.map(notif => (
-                <div 
-                  key={notif.id} 
-                  className="p-4 bg-blue-50 border border-blue-200 rounded-lg cursor-pointer hover:bg-blue-100"
-                  onClick={() => handleMarkNotificationRead(notif.id)}
-                >
-                  <p className="text-sm">{notif.message}</p>
-                  <p className="text-xs text-blue-600 mt-1">
-                    Click to mark as read
-                  </p>
-                </div>
-              ))
-            )}
-          </TabsContent>
-        </Tabs>
-      </CardContent>
-    </Card>
+      {/* Confirm Delete Dialog */}
+      <Dialog open={!!confirmDeleteId} onOpenChange={() => setConfirmDeleteId(null)}>
+        <DialogContent className="max-w-sm" aria-describedby="confirm-delete-desc">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-red-600">
+              <AlertTriangle className="h-5 w-5" />
+              {confirmDeleteType === 'connection' ? 'Remove Connection' : 'Cancel Invitation'}
+            </DialogTitle>
+          </DialogHeader>
+          <p id="confirm-delete-desc" className="text-gray-600 text-sm">
+            {confirmDeleteType === 'connection'
+              ? 'Are you sure you want to remove this connection? This action cannot be undone.'
+              : 'Are you sure you want to cancel this pending invitation?'}
+          </p>
+          <div className="flex gap-3 pt-2">
+            <Button variant="outline" className="flex-1" onClick={() => setConfirmDeleteId(null)}>
+              Keep it
+            </Button>
+            <Button
+              variant="destructive"
+              className="flex-1"
+              onClick={() => {
+                if (!confirmDeleteId) return;
+                if (confirmDeleteType === 'connection') {
+                  handleDeleteConnection(confirmDeleteId);
+                } else {
+                  handleCancelInvitation(confirmDeleteId);
+                }
+              }}
+            >
+              <Trash2 className="h-4 w-4 mr-2" />
+              {confirmDeleteType === 'connection' ? 'Remove' : 'Cancel Invite'}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 };
 

@@ -3,9 +3,8 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getCurrentUser, getUserProfile, logOut, getAllUsers } from '@/lib/firebase-auth';
 import { db, auth } from '@/lib/firebase';
-import { collection, query, where, getDocs, doc, updateDoc, deleteDoc, orderBy, limit, addDoc } from 'firebase/firestore';
+import { collection, query, getDocs, doc, updateDoc, deleteDoc, limit, addDoc } from 'firebase/firestore';
 import { createUserWithEmailAndPassword } from 'firebase/auth';
-import { logger } from '@/lib/logger';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
@@ -15,7 +14,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Switch } from '@/components/ui/switch';
 import { 
   Shield, Users, Activity, AlertCircle,
   Clock, Calendar, Bell, Download,
@@ -26,9 +24,10 @@ import {
   Stethoscope, Heart, 
   Database, Globe, Lock, Server,
   Signal, SignalHigh, SignalMedium, SignalLow,
-  ToggleLeft,
-  ToggleRight
+  ToggleLeft, ToggleRight, User
 } from 'lucide-react';
+import EmergencyPopup from '@/components/EmergencyPopup';
+import ProfileTab from '@/components/ProfileTab';
 
 interface UserLog {
   id: string;
@@ -118,14 +117,18 @@ const AdminApp = () => {
 
       // Get all emergencies
       const emergenciesRef = collection(db, 'emergencies');
-      const emergenciesQuery = query(emergenciesRef, orderBy('createdAt', 'desc'));
+      const emergenciesQuery = query(emergenciesRef, limit(100));
       const emergenciesSnap = await getDocs(emergenciesQuery);
       
       const emergenciesData: any[] = [];
       emergenciesSnap.forEach((doc) => {
         emergenciesData.push({ id: doc.id, ...doc.data() });
       });
-      setEmergencies(emergenciesData);
+      setEmergencies(emergenciesData.sort((a, b) => {
+        const aT = a.createdAt?.toMillis?.() || a.timestamp?.toMillis?.() || 0;
+        const bT = b.createdAt?.toMillis?.() || b.timestamp?.toMillis?.() || 0;
+        return bT - aT;
+      }));
 
       // Load all system logs and group by user
       await loadAllSystemLogs();
@@ -160,7 +163,7 @@ const AdminApp = () => {
   const loadAllSystemLogs = async () => {
     try {
       const logsRef = collection(db, 'system_logs');
-      const q = query(logsRef, orderBy('timestamp', 'desc'), limit(500));
+      const q = query(logsRef, limit(500));
       const querySnapshot = await getDocs(q);
       
       const groupedLogs: Record<string, UserLog[]> = {};
@@ -434,8 +437,8 @@ const AdminApp = () => {
                 <Shield className="h-6 w-6 text-indigo-300" />
               </div>
               <div>
-                <h1 className="text-2xl font-bold text-slate-100 tracking-tight">Admin Dashboard</h1>
-                <p className="text-sm text-slate-400 mt-0.5">System Monitoring & Control</p>
+                <h1 className="text-2xl font-bold text-slate-100 tracking-tight">Welcome, {profile?.name?.split(' ')[0] || 'Admin'}!</h1>
+                <p className="text-sm text-slate-400 mt-0.5">Admin Dashboard • System Monitoring & Control</p>
               </div>
             </div>
             <div className="flex items-center gap-3">
@@ -546,25 +549,36 @@ const AdminApp = () => {
           </Card>
         </div>
 
-        {/* Tabs - PERFECTLY CENTERED */}
+        {/* Tabs */}
         <Tabs defaultValue="users" className="space-y-6">
-          <TabsList className="bg-slate-800/50 border border-slate-700/50 p-1 rounded-lg w-full flex h-14 backdrop-blur-sm">
-            <TabsTrigger value="users" className="text-slate-400 data-[state=active]:bg-indigo-900/60 data-[state=active]:text-indigo-100 flex-1 rounded-md text-sm font-medium transition-all h-full flex items-center justify-center">
+          <div className="overflow-x-auto">
+          <TabsList className="bg-slate-800/50 border border-slate-700/50 p-1 rounded-lg min-w-full flex h-auto backdrop-blur-sm">
+            <TabsTrigger value="users" className="text-slate-400 data-[state=active]:bg-indigo-900/60 data-[state=active]:text-indigo-100 flex-1 min-w-[130px] rounded-md text-sm font-medium transition-all py-3 flex items-center justify-center gap-1.5 whitespace-nowrap">
+              <Users className="h-3.5 w-3.5 shrink-0" />
               User Management
             </TabsTrigger>
-            <TabsTrigger value="logs" className="text-slate-400 data-[state=active]:bg-indigo-900/60 data-[state=active]:text-indigo-100 flex-1 rounded-md text-sm font-medium transition-all h-full flex items-center justify-center">
+            <TabsTrigger value="logs" className="text-slate-400 data-[state=active]:bg-indigo-900/60 data-[state=active]:text-indigo-100 flex-1 min-w-[120px] rounded-md text-sm font-medium transition-all py-3 flex items-center justify-center gap-1.5 whitespace-nowrap">
+              <Activity className="h-3.5 w-3.5 shrink-0" />
               Activity Logs
             </TabsTrigger>
-            <TabsTrigger value="emergencies" className="text-slate-400 data-[state=active]:bg-indigo-900/60 data-[state=active]:text-indigo-100 flex-1 rounded-md text-sm font-medium transition-all h-full flex items-center justify-center">
+            <TabsTrigger value="emergencies" className="text-slate-400 data-[state=active]:bg-indigo-900/60 data-[state=active]:text-indigo-100 flex-1 min-w-[140px] rounded-md text-sm font-medium transition-all py-3 flex items-center justify-center gap-1.5 whitespace-nowrap">
+              <AlertCircle className="h-3.5 w-3.5 shrink-0" />
               Emergency Alerts
             </TabsTrigger>
-            <TabsTrigger value="analytics" className="text-slate-400 data-[state=active]:bg-indigo-900/60 data-[state=active]:text-indigo-100 flex-1 rounded-md text-sm font-medium transition-all h-full flex items-center justify-center">
+            <TabsTrigger value="analytics" className="text-slate-400 data-[state=active]:bg-indigo-900/60 data-[state=active]:text-indigo-100 flex-1 min-w-[100px] rounded-md text-sm font-medium transition-all py-3 flex items-center justify-center gap-1.5 whitespace-nowrap">
+              <Activity className="h-3.5 w-3.5 shrink-0" />
               Analytics
             </TabsTrigger>
-            <TabsTrigger value="system" className="text-slate-400 data-[state=active]:bg-indigo-900/60 data-[state=active]:text-indigo-100 flex-1 rounded-md text-sm font-medium transition-all h-full flex items-center justify-center">
+            <TabsTrigger value="system" className="text-slate-400 data-[state=active]:bg-indigo-900/60 data-[state=active]:text-indigo-100 flex-1 min-w-[120px] rounded-md text-sm font-medium transition-all py-3 flex items-center justify-center gap-1.5 whitespace-nowrap">
+              <Server className="h-3.5 w-3.5 shrink-0" />
               System Health
             </TabsTrigger>
+            <TabsTrigger value="profile" className="text-slate-400 data-[state=active]:bg-indigo-900/60 data-[state=active]:text-indigo-100 flex-1 min-w-[100px] rounded-md text-sm font-medium transition-all py-3 flex items-center justify-center gap-1.5 whitespace-nowrap">
+              <User className="h-3.5 w-3.5 shrink-0" />
+              Profile
+            </TabsTrigger>
           </TabsList>
+          </div>
 
           {/* User Management Tab */}
           <TabsContent value="users">
@@ -882,8 +896,23 @@ const AdminApp = () => {
               </CardContent>
             </Card>
           </TabsContent>
+
+          {/* Profile Tab */}
+          <TabsContent value="profile" className="mt-4">
+            <div className="bg-slate-800/50 rounded-xl p-1">
+              <ProfileTab
+                user={user}
+                profile={profile}
+                onProfileUpdated={(updated) => setProfile(updated)}
+                roleColor="indigo"
+              />
+            </div>
+          </TabsContent>
         </Tabs>
       </main>
+
+      {/* Emergency Popup */}
+      {user && <EmergencyPopup userId={user.uid} />}
 
       {/* Add User Modal */}
       <Dialog open={showAddUserModal} onOpenChange={setShowAddUserModal}>

@@ -14,10 +14,8 @@ import Schedule from '@/pages/Schedule';
 import Medicines from '@/pages/Medicines';
 import AddMedicine from '@/pages/AddMedicine';
 import AcceptInvite from '@/pages/AcceptInvite';
-import Connections from '@/pages/Connections'; // Keep ONLY this one
-
-// REMOVE this line:
-// import ConnectionsPage from './pages/ConnectionsPage';
+import Connections from '@/pages/Connections';
+import AccessibilityToolbar from '@/components/AccessibilityToolbar';
 
 function App() {
   useEffect(() => {
@@ -39,28 +37,19 @@ function App() {
           <Route path="/login" element={<Login />} />
           <Route path="/signup" element={<Signup />} />
           <Route path="/accept-invite" element={<AcceptInvite />} />
-          
+
           <Route path="/elderly" element={
             <ProtectedRoute allowedRoles={['elderly']}>
               <ElderlyApp />
             </ProtectedRoute>
           } />
-          
+
           <Route path="/caregiver" element={
             <ProtectedRoute allowedRoles={['caregiver']}>
               <CaregiverApp />
             </ProtectedRoute>
           } />
-          
-          {/* REMOVE this entire route block:
-          <Route path="/connections-page" element={
-            <ProtectedRoute allowedRoles={['elderly', 'caregiver', 'doctor', 'admin']}>
-              <ConnectionsPage />
-            </ProtectedRoute>
-          } />
-          */}
 
-          {/* KEEP only this one connections route */}
           <Route path="/connections" element={
             <ProtectedRoute allowedRoles={['elderly', 'caregiver', 'doctor', 'admin']}>
               <Connections />
@@ -72,7 +61,7 @@ function App() {
               <DoctorApp />
             </ProtectedRoute>
           } />
-          
+
           <Route path="/admin" element={
             <ProtectedRoute allowedRoles={['admin']}>
               <AdminApp />
@@ -84,21 +73,25 @@ function App() {
               <Schedule />
             </ProtectedRoute>
           } />
-          
+
           <Route path="/medicines" element={
             <ProtectedRoute allowedRoles={['elderly', 'caregiver', 'doctor']}>
               <Medicines />
             </ProtectedRoute>
           } />
-          
+
           <Route path="/medicines/add" element={
             <ProtectedRoute allowedRoles={['elderly', 'caregiver', 'doctor']}>
               <AddMedicine />
             </ProtectedRoute>
           } />
+
+          {/* Catch-all: redirect to login */}
+          <Route path="*" element={<Navigate to="/login" replace />} />
         </Routes>
       </BrowserRouter>
       <Toaster />
+      <AccessibilityToolbar />
     </TooltipProvider>
   );
 }
