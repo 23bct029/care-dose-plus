@@ -231,6 +231,10 @@ const ElderlyApp = () => {
       await checkRefillAlerts(currentUser, medicinesData, userProfile);
 
       await logger.logWithUser(currentUser.uid, currentUser.email, 'info', 'Elderly dashboard loaded');
+      // Request push notification permission
+      if ('Notification' in window && Notification.permission === 'default') {
+        Notification.requestPermission();
+      }
       // Register FCM push token for this device
       registerPushNotifications(currentUser.uid).then(token => {
         if (token) console.log('[FCM] Push registered for elderly user');
@@ -299,6 +303,16 @@ const ElderlyApp = () => {
       if (!m.taken && !m.skipped && m.schedule?.includes(t)) {
         sendBrowserNotification('💊 Medicine Reminder', `Time to take ${m.name} - ${m.dosage}`);
         if (!isMuted) speechService.speak(`Time to take ${m.name}, ${m.dosage}`);
+        // Show browser/device push notification
+        if ('Notification' in window && Notification.permission === 'granted') {
+          new Notification('💊 Medicine Reminder — CareDose+', {
+            body: `Time to take ${m.name} ${m.dosage}${m.foodTiming ? ` (${m.foodTiming} food)` : ''}`,
+            icon: '/icons/icon-192.png',
+            badge: '/icons/icon-72.png',
+            tag: `med-${m.id}`,
+            requireInteraction: true,
+          });
+        }
       }
     });
   };
@@ -427,30 +441,75 @@ const ElderlyApp = () => {
   };
 
   const processVoiceInput = async (text: string) => {
+    if (!text || !user) return;
     const ctx = {
-      nextDose, medicines, appointments, caregivers, missedDoses,
-      adherenceRate, profileName: profile?.name
+      medicines, nextDose, caregivers, doctors,
+      appointments: appointments.filter(a => a.date >= new Date().toISOString().split('T')[0]),
+      missedDoses, adherenceRate, profileName: profile?.name || 'friend',
+      wellnessScore: adherenceRate,
     };
     const intent = speechService.processQuery(text.toLowerCase());
     let reply = await speechService.handleIntent(intent, ctx);
 
-    // Handle action responses
-    if (reply==='EMERGENCY_MODAL') { setShowEmergencyModal(true); reply='Please select the type of emergency.'; }
-    else if (reply==='EMERGENCY_FALL') { await handleEmergency('fall'); reply='🚨 Fall alert sent! Help is on the way.'; }
-    else if (reply==='EMERGENCY_PAIN') { await handleEmergency('pain'); reply='🚨 Pain alert sent!'; }
-    else if (reply==='EMERGENCY_CONFUSION') { await handleEmergency('confusion'); reply='🚨 Confusion alert sent!'; }
-    else if (reply.startsWith('CALL_CAREGIVER:') && caregivers[0]?.phone) {
-      window.location.href = `tel:${caregivers[0].phone}`;
-      reply = `Calling ${caregivers[0].name}...`;
+    // Handle action intents
+    if (reply === 'EMERGENCY_MODAL' || reply.startsWith('EMERGENCY_')) {
+      const typeMap: Record<string,string> = {
+        EMERGENCY_FALL:'fall', EMERGENCY_PAIN:'chest pain', EMERGENCY_CONFUSION:'confusion',
+        EMERGENCY_BLEEDING:'bleeding', EMERGENCY_BREATHING:'breathing difficulty', EMERGENCY_STROKE:'stroke'
+      };
+      const eType = typeMap[reply] || 'emergency';
+      setShowEmergencyModal(true);
+      reply = `Sending ${eType} emergency alert! Help is on the way.`;
+    } else if (reply === 'CALL_911') {
+      window.location.href = 'tel:911';
+      reply = 'Calling 911 now!';
+    } else if (reply.startsWith('CALL_CAREGIVER:')) {
+      const cg = caregivers[0];
+      if (cg?.phone) window.location.href = `tel:${cg.phone}`;
+      reply = `Calling ${cg?.name || 'your caregiver'} now!`;
+    } else if (reply.startsWith('VIDEO_CAREGIVER:')) {
+      if (caregivers.length > 0) {
+        setVideoDoctor({ id: caregivers[0].id, name: caregivers[0].name });
+        setShowVideoConsult(true);
+        reply = `Starting video call with ${caregivers[0].name}!`;
+      }
+    } else if (reply.startsWith('CALL_DOCTOR:')) {
+      const dr = doctors?.[0];
+      if (dr?.phone) window.location.href = `tel:${dr.phone}`;
+      reply = `Calling Dr. ${dr?.name || 'your doctor'} now!`;
+    } else if (reply.startsWith('VIDEO_DOCTOR:')) {
+      if (doctors && doctors.length > 0) {
+        setVideoDoctor({ id: doctors[0].id, name: doctors[0].name });
+        setShowVideoConsult(true);
+        reply = `Starting video call with Dr. ${doctors[0].name}!`;
+      }
+    } else if (reply.startsWith('MARK_TAKEN:')) {
+      const parts = reply.split(':');
+      const medId = parts[1], doseTime = parts[2];
+      if (medId) {
+        await handleMarkTaken(medId, doseTime || '');
+        reply = `Great! ${medicines.find(m=>m.id===medId)?.name || 'Medicine'} marked as taken!`;
+      }
+    } else if (reply.startsWith('MARK_SKIPPED:')) {
+      const parts = reply.split(':');
+      const medId = parts[1], doseTime = parts[2];
+      if (medId) {
+        await handleMarkSkipped(medId, doseTime || '');
+        reply = `${medicines.find(m=>m.id===medId)?.name || 'Medicine'} skipped.`;
+      }
+    } else if (reply === 'BOOK_APPOINTMENT') {
+      navigate('/schedule');
+      reply = 'Opening your appointment schedule. You can book an appointment there!';
+    } else if (reply === 'RESTOCK_MEDICINE') {
+      reply = 'To restock, tap the +Restock button next to any medicine in your list below.';
+    } else if (reply === 'CALL_FAMILY') {
+      reply = 'Please use the caregivers section to call a family member.';
     }
-    else if (reply==='CALL_911') { window.location.href='tel:911'; reply='Calling emergency services...'; }
-    else if (reply.startsWith('MARK_TAKEN:') && nextDose) { await handleMarkTaken(nextDose.id, nextDose.time); reply=`✅ ${nextDose.name} marked as taken!`; }
-    else if (reply.startsWith('MARK_SKIPPED:') && nextDose) { await handleMarkSkipped(nextDose.id, nextDose.time); reply=`⏭ ${nextDose.name} skipped.`; }
 
     setVoiceReply(reply);
-    setVoiceHistory(prev => [{q:text, a:reply}, ...prev].slice(0,5));
+    setVoiceHistory(prev => [{ q: text, a: reply }, ...prev].slice(0, 6));
     if (!isMuted) speechService.speak(reply);
-    await logger.logWithUser(user?.uid, user?.email, 'info', 'Voice command', {text, intent});
+    await logger.logWithUser(user?.uid, user?.email, 'info', 'Voice command', { text, intent });
   };
 
   const saveProfile = async () => {

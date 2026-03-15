@@ -16,9 +16,10 @@ interface VideoConsultProps {
   patientId: string;
   appointmentId?: string;
   role: 'doctor' | 'patient';
+  callerName?: string;
 }
 
-const VideoConsult = ({ open, onClose, doctorName, patientName, doctorId, patientId, appointmentId, role }: VideoConsultProps) => {
+const VideoConsult = ({ open, onClose, doctorName, patientName, doctorId, patientId, appointmentId, role, callerName }: VideoConsultProps) => {
   const [started, setStarted] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const callDocId = useRef<string|null>(null);
@@ -33,6 +34,7 @@ const VideoConsult = ({ open, onClose, doctorName, patientName, doctorId, patien
     if (role === 'doctor') {
       addDoc(collection(db, 'video_calls'), {
         doctorId, patientId, doctorName, patientName, roomName,
+        callerName: callerName || `Dr. ${doctorName}`,
         status: 'ringing', initiatedAt: serverTimestamp(), appointmentId: appointmentId || null,
       }).then(ref => { callDocId.current = ref.id; }).catch(() => {});
     }

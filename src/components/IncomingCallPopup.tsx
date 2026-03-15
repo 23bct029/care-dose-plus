@@ -1,9 +1,8 @@
-// src/components/IncomingCallPopup.tsx
-// Real-time incoming call popup using Firestore as signaling layer
+// Real-time incoming call popup via Firestore signaling
 import { useState, useEffect, useRef } from 'react';
 import { db } from '@/lib/firebase';
 import { collection, query, where, onSnapshot, updateDoc, doc, serverTimestamp } from 'firebase/firestore';
-import { Video, PhoneOff, Phone } from 'lucide-react';
+import { Video, PhoneOff } from 'lucide-react';
 
 interface IncomingCallPopupProps {
   currentUserId: string;
@@ -18,126 +17,125 @@ export interface CallData {
   doctorName: string;
   patientName: string;
   roomName: string;
+  callerName?: string;
   appointmentId?: string;
 }
 
 const IncomingCallPopup = ({ currentUserId, currentUserName, onAccept }: IncomingCallPopupProps) => {
-  const [incomingCall, setIncomingCall] = useState<CallData | null>(null);
-  const audioCtxRef = useRef<AudioContext | null>(null);
-  const ringIntervalRef = useRef<any>(null);
+  const [call, setCall] = useState<CallData | null>(null);
+  const ringRef = useRef<any>(null);
+  const audioRef = useRef<AudioContext | null>(null);
 
   useEffect(() => {
-    // Listen for calls where this user is the patient and status is 'ringing'
+    if (!currentUserId) return;
+    
+    // Listen for ANY call where this user is the receiver (patientId)
+    // Both doctors and caregivers can call the elderly user
     const q = query(
       collection(db, 'video_calls'),
       where('patientId', '==', currentUserId),
       where('status', '==', 'ringing')
     );
-    const unsub = onSnapshot(q, snap => {
+
+    const unsub = onSnapshot(q, (snap) => {
       if (!snap.empty) {
-        const callDoc = snap.docs[0];
-        const data = callDoc.data();
-        setIncomingCall({ id: callDoc.id, ...data } as CallData);
-        startRinging();
+        const d = snap.docs[0];
+        setCall({ id: d.id, ...d.data() } as CallData);
+        startRing();
       } else {
-        setIncomingCall(null);
-        stopRinging();
+        setCall(null);
+        stopRing();
       }
+    }, (error) => {
+      console.error('IncomingCallPopup listener error:', error);
     });
-    return () => { unsub(); stopRinging(); };
+
+    return () => { unsub(); stopRing(); };
   }, [currentUserId]);
 
-  const startRinging = () => {
-    stopRinging();
+  const startRing = () => {
+    stopRing();
     const ring = () => {
       try {
         const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
-        audioCtxRef.current = ctx;
-        const playTone = (freq: number, start: number, duration: number) => {
-          const osc = ctx.createOscillator();
-          const gain = ctx.createGain();
-          osc.connect(gain); gain.connect(ctx.destination);
-          osc.frequency.value = freq; osc.type = 'sine';
-          gain.gain.setValueAtTime(0.25, ctx.currentTime + start);
-          gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + start + duration);
-          osc.start(ctx.currentTime + start);
-          osc.stop(ctx.currentTime + start + duration);
+        audioRef.current = ctx;
+        const play = (f: number, t: number, d: number) => {
+          const o = ctx.createOscillator(), g = ctx.createGain();
+          o.connect(g); g.connect(ctx.destination);
+          o.frequency.value = f; o.type = 'sine';
+          g.gain.setValueAtTime(0.2, ctx.currentTime + t);
+          g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + t + d);
+          o.start(ctx.currentTime + t); o.stop(ctx.currentTime + t + d);
         };
-        playTone(880, 0, 0.2);
-        playTone(1100, 0.25, 0.2);
-        playTone(880, 0.5, 0.2);
+        play(880, 0, 0.15); play(1100, 0.2, 0.15); play(880, 0.4, 0.15);
       } catch {}
     };
     ring();
-    ringIntervalRef.current = setInterval(ring, 2500);
+    ringRef.current = setInterval(ring, 2800);
   };
 
-  const stopRinging = () => {
-    if (ringIntervalRef.current) { clearInterval(ringIntervalRef.current); ringIntervalRef.current = null; }
-    try { audioCtxRef.current?.close(); } catch {}
+  const stopRing = () => {
+    if (ringRef.current) { clearInterval(ringRef.current); ringRef.current = null; }
+    try { audioRef.current?.close(); } catch {}
   };
 
   const handleAccept = async () => {
-    if (!incomingCall) return;
-    stopRinging();
-    await updateDoc(doc(db, 'video_calls', incomingCall.id), {
-      status: 'accepted', acceptedAt: serverTimestamp()
-    });
-    onAccept(incomingCall);
-    setIncomingCall(null);
+    if (!call) return;
+    stopRing();
+    try {
+      await updateDoc(doc(db, 'video_calls', call.id), {
+        status: 'accepted', acceptedAt: serverTimestamp()
+      });
+    } catch {}
+    onAccept(call);
+    setCall(null);
   };
 
   const handleDecline = async () => {
-    if (!incomingCall) return;
-    stopRinging();
-    await updateDoc(doc(db, 'video_calls', incomingCall.id), {
-      status: 'declined', declinedAt: serverTimestamp()
-    });
-    setIncomingCall(null);
+    if (!call) return;
+    stopRing();
+    try {
+      await updateDoc(doc(db, 'video_calls', call.id), {
+        status: 'declined', declinedAt: serverTimestamp()
+      });
+    } catch {}
+    setCall(null);
   };
 
-  if (!incomingCall) return null;
+  if (!call) return null;
+
+  const callerName = call.callerName || call.doctorName;
 
   return (
-    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/70 backdrop-blur-md animate-fade-in">
-      <div className="bg-gray-900 rounded-3xl shadow-2xl w-full max-w-sm mx-4 overflow-hidden border border-gray-700">
+    <div className="fixed inset-0 z-[200] flex items-end sm:items-center justify-center bg-black/70 backdrop-blur-md p-4">
+      <div className="bg-gray-900 rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden border border-white/10">
         {/* Animated ring */}
-        <div className="relative flex items-center justify-center py-8 bg-gradient-to-b from-gray-800 to-gray-900">
-          <div className="absolute h-36 w-36 rounded-full border-4 border-green-500/30 animate-ping"></div>
-          <div className="absolute h-28 w-28 rounded-full border-4 border-green-500/50 animate-pulse"></div>
+        <div className="relative flex items-center justify-center py-10 bg-gradient-to-b from-gray-800 to-gray-900">
+          <div className="absolute h-36 w-36 rounded-full border-4 border-green-500/20 animate-ping"/>
+          <div className="absolute h-28 w-28 rounded-full border-4 border-green-500/40 animate-pulse"/>
           <div className="h-20 w-20 rounded-full bg-gradient-to-br from-green-500 to-teal-600 flex items-center justify-center shadow-xl z-10">
-            <Video className="h-10 w-10 text-white" />
+            <Video className="h-10 w-10 text-white"/>
           </div>
         </div>
 
-        {/* Call info */}
         <div className="px-6 py-5 text-center">
           <p className="text-gray-400 text-xs font-medium uppercase tracking-widest mb-2">Incoming Video Call</p>
-          <h2 className="text-2xl font-bold text-white mb-1">Dr. {incomingCall.doctorName}</h2>
-          <p className="text-gray-400 text-sm">is calling you for a video consultation</p>
+          <h2 className="text-2xl font-bold text-white mb-1">{callerName || 'Unknown Caller'}</h2>
+          <p className="text-gray-400 text-sm">is calling you for a consultation</p>
         </div>
 
-        {/* Actions */}
-        <div className="flex gap-4 px-6 pb-8 justify-center">
-          <button
-            onClick={handleDecline}
-            className="h-16 w-16 rounded-full bg-red-600 hover:bg-red-700 flex flex-col items-center justify-center transition-all hover:scale-105 shadow-lg"
-          >
-            <PhoneOff className="h-6 w-6 text-white mb-0.5" />
+        <div className="flex gap-6 px-8 pb-8 justify-center">
+          <button onClick={handleDecline}
+            className="h-16 w-16 rounded-full bg-red-600 hover:bg-red-700 flex flex-col items-center justify-center gap-1 transition-all hover:scale-105 shadow-lg shadow-red-900/50">
+            <PhoneOff className="h-6 w-6 text-white"/>
             <span className="text-white text-[10px] font-medium">Decline</span>
           </button>
-          <button
-            onClick={handleAccept}
-            className="h-16 w-16 rounded-full bg-green-600 hover:bg-green-700 flex flex-col items-center justify-center transition-all hover:scale-105 shadow-lg animate-bounce"
-          >
-            <Video className="h-6 w-6 text-white mb-0.5" />
+          <button onClick={handleAccept}
+            className="h-16 w-16 rounded-full bg-green-600 hover:bg-green-700 flex flex-col items-center justify-center gap-1 transition-all hover:scale-105 shadow-lg shadow-green-900/50 animate-bounce">
+            <Video className="h-6 w-6 text-white"/>
             <span className="text-white text-[10px] font-medium">Accept</span>
           </button>
         </div>
-
-        <p className="text-center text-xs text-gray-600 pb-4">
-          Powered by Jitsi Meet · End-to-end encrypted
-        </p>
       </div>
     </div>
   );

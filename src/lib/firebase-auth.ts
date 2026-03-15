@@ -4,9 +4,12 @@ import {
   signOut,
   onAuthStateChanged,
   User,
-  UserCredential
+  GoogleAuthProvider,
+  signInWithPopup,
+  browserLocalPersistence,
+  setPersistence
 } from 'firebase/auth';
-import { doc, getDoc, setDoc, collection, query, where, getDocs } from 'firebase/firestore';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { auth, db } from './firebase';
 
 export interface UserProfile {
@@ -19,7 +22,6 @@ export interface UserProfile {
   isActive?: boolean;
   createdAt?: string;
   updatedAt?: string;
-  // Medical profile fields
   bloodGroup?: string;
   age?: number;
   gender?: string;
@@ -31,173 +33,127 @@ export interface UserProfile {
   riskLevel?: 'low' | 'medium' | 'high';
 }
 
-// Get current user as Promise
+// Set local persistence ONCE at module load — survives page refresh and tab close
+setPersistence(auth, browserLocalPersistence).catch(() => {});
+
+// Get current user — waits for Firebase auth state to resolve
 export const getCurrentUser = (): Promise<User | null> => {
   return new Promise((resolve) => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      unsubscribe();
-      resolve(user);
-    });
+    // If already loaded, return immediately
+    if (auth.currentUser !== undefined) {
+      const unsub = onAuthStateChanged(auth, (user) => {
+        unsub();
+        resolve(user);
+      });
+    } else {
+      const unsub = onAuthStateChanged(auth, (user) => {
+        unsub();
+        resolve(user);
+      });
+    }
   });
 };
 
-// Listen to auth state changes
 export const onAuthStateChange = (callback: (user: User | null) => void) => {
   return onAuthStateChanged(auth, callback);
 };
 
-// Get user profile from Firestore
 export const getUserProfile = async (uid: string): Promise<UserProfile | null> => {
   try {
-    const docRef = doc(db, 'users', uid);
-    const docSnap = await getDoc(docRef);
-    
-    if (docSnap.exists()) {
-      return docSnap.data() as UserProfile;
-    } else {
-      // If profile doesn't exist, create one from auth user
-      const authUser = auth.currentUser;
-      if (authUser && authUser.uid === uid) {
-        console.log('Creating missing profile for:', authUser.email);
-        
-        let role: UserProfile['role'] = 'elderly';
-        if (authUser.email?.includes('admin')) role = 'admin';
-        else if (authUser.email?.includes('caregiver')) role = 'caregiver';
-        else if (authUser.email?.includes('doctor')) role = 'doctor';
-        
-        const newProfile: UserProfile = {
-          uid: authUser.uid,
-          email: authUser.email,
-          name: authUser.email?.split('@')[0] || 'User',
-          role: role,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString()
-        };
-        
-        await setDoc(docRef, newProfile);
-        console.log('✅ Created missing profile for:', authUser.email);
-        return newProfile;
-      }
-      return null;
+    const docSnap = await getDoc(doc(db, 'users', uid));
+    if (docSnap.exists()) return docSnap.data() as UserProfile;
+    // Create minimal profile from auth user
+    const authUser = auth.currentUser;
+    if (authUser && authUser.uid === uid) {
+      let role: UserProfile['role'] = 'elderly';
+      if (authUser.email?.includes('admin')) role = 'admin';
+      else if (authUser.email?.includes('caregiver')) role = 'caregiver';
+      else if (authUser.email?.includes('doctor')) role = 'doctor';
+      const profile: UserProfile = {
+        uid: authUser.uid, email: authUser.email,
+        name: authUser.displayName || authUser.email?.split('@')[0] || 'User',
+        role, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString()
+      };
+      await setDoc(doc(db, 'users', uid), profile);
+      return profile;
     }
-  } catch (error) {
-    console.error('Error getting user profile:', error);
     return null;
-  }
+  } catch (e) { console.error('getUserProfile error:', e); return null; }
 };
 
-// Login
 export const logIn = async (email: string, password: string) => {
   try {
-    const userCredential = await signInWithEmailAndPassword(auth, email, password);
-    return { user: userCredential.user, error: null };
+    const cred = await signInWithEmailAndPassword(auth, email, password);
+    return { user: cred.user, error: null };
   } catch (error: any) {
-    let errorMessage = 'Invalid email or password';
-    
-    // Handle specific Firebase errors
-    switch (error.code) {
-      case 'auth/user-not-found':
-        errorMessage = 'No account found with this email';
-        break;
-      case 'auth/wrong-password':
-        errorMessage = 'Incorrect password';
-        break;
-      case 'auth/invalid-email':
-        errorMessage = 'Invalid email address';
-        break;
-      case 'auth/too-many-requests':
-        errorMessage = 'Too many failed attempts. Please try again later';
-        break;
-      case 'auth/user-disabled':
-        errorMessage = 'This account has been disabled';
-        break;
-    }
-    
-    return { user: null, error: errorMessage };
+    const msgs: Record<string, string> = {
+      'auth/user-not-found': 'No account found with this email',
+      'auth/wrong-password': 'Incorrect password',
+      'auth/invalid-email': 'Invalid email address',
+      'auth/too-many-requests': 'Too many attempts. Please try again later.',
+      'auth/invalid-credential': 'Invalid email or password',
+      'auth/network-request-failed': 'Network error. Check your connection.',
+    };
+    return { user: null, error: msgs[error.code] || 'Login failed. Please try again.' };
   }
 };
 
-// Sign up
+export const signInWithGoogle = async (defaultRole: 'elderly' | 'caregiver' | 'doctor' = 'elderly') => {
+  try {
+    const provider = new GoogleAuthProvider();
+    provider.addScope('email');
+    provider.addScope('profile');
+    const cred = await signInWithPopup(auth, provider);
+    const user = cred.user;
+    // Check if profile exists
+    const existing = await getDoc(doc(db, 'users', user.uid));
+    if (!existing.exists()) {
+      // New Google user — create profile with default role
+      const profile: UserProfile = {
+        uid: user.uid, email: user.email,
+        name: user.displayName || user.email?.split('@')[0] || 'User',
+        role: defaultRole, avatar: user.photoURL || undefined,
+        createdAt: new Date().toISOString(), updatedAt: new Date().toISOString()
+      };
+      await setDoc(doc(db, 'users', user.uid), profile);
+      return { user, profile, isNewUser: true, error: null };
+    }
+    const profile = existing.data() as UserProfile;
+    return { user, profile, isNewUser: false, error: null };
+  } catch (error: any) {
+    if (error.code === 'auth/popup-closed-by-user') return { user: null, profile: null, isNewUser: false, error: null };
+    return { user: null, profile: null, isNewUser: false, error: 'Google sign-in failed. Please try again.' };
+  }
+};
+
 export const signUp = async (email: string, password: string, userData: Partial<UserProfile>) => {
   try {
-    const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-    const user = userCredential.user;
-    
+    const cred = await createUserWithEmailAndPassword(auth, email, password);
     const profile: UserProfile = {
-      uid: user.uid,
-      email: user.email,
-      name: userData.name || email.split('@')[0],
-      role: (userData.role as UserProfile['role']) || 'elderly',
-      phone: userData.phone || '',
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
+      uid: cred.user.uid, email, name: userData.name || email.split('@')[0],
+      role: userData.role || 'elderly', isActive: true,
+      createdAt: new Date().toISOString(), updatedAt: new Date().toISOString()
     };
-    
-    await setDoc(doc(db, 'users', user.uid), profile);
-    
-    return { user: profile, error: null };
+    await setDoc(doc(db, 'users', cred.user.uid), profile);
+    return { user: cred.user, error: null };
   } catch (error: any) {
-    let errorMessage = 'Failed to create account';
-    
-    switch (error.code) {
-      case 'auth/email-already-in-use':
-        errorMessage = 'Email already in use';
-        break;
-      case 'auth/invalid-email':
-        errorMessage = 'Invalid email address';
-        break;
-      case 'auth/weak-password':
-        errorMessage = 'Password is too weak';
-        break;
-    }
-    
-    return { user: null, error: errorMessage };
+    const msgs: Record<string, string> = {
+      'auth/email-already-in-use': 'An account with this email already exists',
+      'auth/weak-password': 'Password must be at least 6 characters',
+      'auth/invalid-email': 'Invalid email address',
+    };
+    return { user: null, error: msgs[error.code] || 'Registration failed. Please try again.' };
   }
 };
 
-// Log out
 export const logOut = async () => {
-  try {
-    await signOut(auth);
-    return { error: null };
-  } catch (error: any) {
-    return { error: error.message };
-  }
+  await signOut(auth);
 };
 
-// Get all users (admin only)
 export const getAllUsers = async (): Promise<UserProfile[]> => {
   try {
-    const usersRef = collection(db, 'users');
-    const querySnapshot = await getDocs(usersRef);
-    
-    const users: UserProfile[] = [];
-    querySnapshot.forEach((doc) => {
-      users.push(doc.data() as UserProfile);
-    });
-    
-    return users;
-  } catch (error) {
-    console.error('Error getting all users:', error);
-    return [];
-  }
-};
-
-// Get users by role
-export const getUsersByRole = async (role: UserProfile['role']): Promise<UserProfile[]> => {
-  try {
-    const usersRef = collection(db, 'users');
-    const q = query(usersRef, where('role', '==', role));
-    const querySnapshot = await getDocs(q);
-    
-    const users: UserProfile[] = [];
-    querySnapshot.forEach((doc) => {
-      users.push(doc.data() as UserProfile);
-    });
-    
-    return users;
-  } catch (error) {
-    console.error(`Error getting users by role ${role}:`, error);
-    return [];
-  }
+    const { getDocs, collection } = await import('firebase/firestore');
+    const snap = await getDocs(collection(db, 'users'));
+    return snap.docs.map(d => d.data() as UserProfile);
+  } catch { return []; }
 };

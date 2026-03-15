@@ -617,7 +617,8 @@ const CaregiverApp = () => {
     {user && videoTarget && (
       <VideoConsult open={showVideoConsult} onClose={()=>setShowVideoConsult(false)}
         doctorName={profile?.name||'Caregiver'} patientName={videoTarget.name}
-        doctorId={user.uid} patientId={videoTarget.id} role="doctor"/>
+        doctorId={user.uid} patientId={videoTarget.id} role="doctor"
+        callerName={profile?.name}/>
     )}
     </div>
   );
