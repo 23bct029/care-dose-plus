@@ -73,6 +73,9 @@ const ElderlyApp = () => {
   const [voiceText, setVoiceText] = useState('');
   const [voiceReply, setVoiceReply] = useState('');
   const [voiceInput, setVoiceInput] = useState('');
+  const [showVoiceHelp, setShowVoiceHelp] = useState(false);
+  // Appointment booking flow state
+  const [bookingFlow, setBookingFlow] = useState<{step:'date'|'time'|'type'|'confirm'|null; date?:string; time?:string; type?:string}>({step:null});
   const [voiceHistory, setVoiceHistory] = useState<{q:string;a:string}[]>([]);
   // Profile editing
   const [isEditingProfile, setIsEditingProfile] = useState(false);
@@ -89,6 +92,16 @@ const ElderlyApp = () => {
   const [acceptedCallData, setAcceptedCallData] = useState<any>(null);
   const navigate = useNavigate();
   const timerRef = useRef<any>(null);
+
+  // Stop speech on component unmount or page hide (prevents speech after refresh)
+  useEffect(() => {
+    const onHide = () => speechService.stopAll();
+    document.addEventListener('visibilitychange', onHide);
+    return () => {
+      document.removeEventListener('visibilitychange', onHide);
+      speechService.stopAll();
+    };
+  }, []);
 
   // Listen for SW sync messages
   useEffect(() => {
@@ -464,69 +477,60 @@ const ElderlyApp = () => {
       medicines, nextDose, caregivers, doctors,
       appointments: appointments.filter(a => a.date >= new Date().toISOString().split('T')[0]),
       missedDoses, adherenceRate, profileName: profile?.name || 'friend',
-      wellnessScore: adherenceRate,
     };
     const intent = speechService.processQuery(text.toLowerCase());
     let reply = await speechService.handleIntent(intent, ctx);
+    let spoken = reply;
 
-    // Handle action intents
-    if (reply === 'EMERGENCY_MODAL' || reply.startsWith('EMERGENCY_')) {
-      const typeMap: Record<string,string> = {
-        EMERGENCY_FALL:'fall', EMERGENCY_PAIN:'chest pain', EMERGENCY_CONFUSION:'confusion',
-        EMERGENCY_BLEEDING:'bleeding', EMERGENCY_BREATHING:'breathing difficulty', EMERGENCY_STROKE:'stroke'
-      };
-      const eType = typeMap[reply] || 'emergency';
+    if (reply === 'SHOW_HELP') {
+      setShowVoiceHelp(true);
+      spoken = 'Here is a list of everything I can do for you. You can tap any command or say it out loud.';
+      reply = spoken;
+    } else if (reply === 'EMERGENCY_MODAL' || reply.startsWith('EMERGENCY:')) {
+      const t = reply.includes(':') ? reply.split(':')[1] : 'emergency';
       setShowEmergencyModal(true);
-      reply = `Sending ${eType} emergency alert! Help is on the way.`;
+      spoken = `Sending ${t} emergency alert now. Help is on the way!`;
+      reply = spoken;
     } else if (reply === 'CALL_911') {
       window.location.href = 'tel:911';
-      reply = 'Calling 911 now!';
+      spoken = 'Calling 911 now!'; reply = spoken;
     } else if (reply.startsWith('CALL_CAREGIVER:')) {
-      const cg = caregivers[0];
-      if (cg?.phone) window.location.href = `tel:${cg.phone}`;
-      reply = `Calling ${cg?.name || 'your caregiver'} now!`;
+      const [,phone,cgName] = reply.split(':');
+      if (caregivers[0]?.phone) window.location.href = `tel:${caregivers[0].phone}`;
+      spoken = `Calling ${cgName || 'your caregiver'} now!`; reply = spoken;
     } else if (reply.startsWith('VIDEO_CAREGIVER:')) {
-      if (caregivers.length > 0) {
-        setVideoDoctor({ id: caregivers[0].id, name: caregivers[0].name });
-        setShowVideoConsult(true);
-        reply = `Starting video call with ${caregivers[0].name}!`;
-      }
+      const [,id,cgName] = reply.split(':');
+      if (id) { setVideoDoctor({ id, name: cgName || caregivers[0]?.name || 'Caregiver' }); setShowVideoConsult(true); }
+      spoken = `Starting video call with ${cgName || 'your caregiver'}!`; reply = spoken;
     } else if (reply.startsWith('CALL_DOCTOR:')) {
-      const dr = doctors?.[0];
-      if (dr?.phone) window.location.href = `tel:${dr.phone}`;
-      reply = `Calling Dr. ${dr?.name || 'your doctor'} now!`;
+      const [,phone,drName] = reply.split(':');
+      if (doctors?.[0]?.phone) window.location.href = `tel:${doctors[0].phone}`;
+      spoken = `Calling Dr. ${drName || 'your doctor'} now!`; reply = spoken;
     } else if (reply.startsWith('VIDEO_DOCTOR:')) {
-      if (doctors && doctors.length > 0) {
-        setVideoDoctor({ id: doctors[0].id, name: doctors[0].name });
-        setShowVideoConsult(true);
-        reply = `Starting video call with Dr. ${doctors[0].name}!`;
-      }
+      const [,id,drName] = reply.split(':');
+      if (id) { setVideoDoctor({ id, name: drName || doctors?.[0]?.name || 'Doctor' }); setShowVideoConsult(true); }
+      spoken = `Starting video call with Dr. ${drName || 'your doctor'}!`; reply = spoken;
     } else if (reply.startsWith('MARK_TAKEN:')) {
-      const parts = reply.split(':');
-      const medId = parts[1], doseTime = parts[2];
-      if (medId) {
-        await handleMarkTaken(medId, doseTime || '');
-        reply = `Great! ${medicines.find(m=>m.id===medId)?.name || 'Medicine'} marked as taken!`;
-      }
+      const [,medId,doseTime,medName] = reply.split(':');
+      if (medId) { await handleMarkTaken(medId, doseTime || ''); }
+      spoken = `${medName || 'Medicine'} marked as taken. Well done!`; reply = spoken;
     } else if (reply.startsWith('MARK_SKIPPED:')) {
-      const parts = reply.split(':');
-      const medId = parts[1], doseTime = parts[2];
-      if (medId) {
-        await handleMarkSkipped(medId, doseTime || '');
-        reply = `${medicines.find(m=>m.id===medId)?.name || 'Medicine'} skipped.`;
-      }
-    } else if (reply === 'BOOK_APPOINTMENT') {
-      navigate('/schedule');
-      reply = 'Opening your appointment schedule. You can book an appointment there!';
+      const [,medId,doseTime,medName] = reply.split(':');
+      if (medId) { await handleMarkSkipped(medId, doseTime || ''); }
+      spoken = `${medName || 'Medicine'} skipped.`; reply = spoken;
+    } else if (reply === 'BOOK_APPOINTMENT_FLOW') {
+      // Start guided booking flow
+      setBookingFlow({ step: 'date' });
+      spoken = 'Sure! Let me help you book an appointment. Please type the date you want, like 2025 March 20.';
+      reply = spoken;
     } else if (reply === 'RESTOCK_MEDICINE') {
-      reply = 'To restock, tap the +Restock button next to any medicine in your list below.';
-    } else if (reply === 'CALL_FAMILY') {
-      reply = 'Please use the caregivers section to call a family member.';
+      spoken = 'To restock medicine, tap the plus Restock button next to any medicine in the list below.';
+      reply = spoken;
     }
 
     setVoiceReply(reply);
     setVoiceHistory(prev => [{ q: text, a: reply }, ...prev].slice(0, 6));
-    if (!isMuted) speechService.speak(reply);
+    if (!isMuted) await speechService.speak(spoken);
     await logger.logWithUser(user?.uid, user?.email, 'info', 'Voice command', { text, intent });
   };
 
@@ -616,7 +620,7 @@ const ElderlyApp = () => {
                 <Users className="h-4 w-4" />
                 {pendingInvitations > 0 && <span className="absolute -top-1 -right-1 h-4 w-4 bg-red-500 rounded-full text-[10px] text-white flex items-center justify-center">{pendingInvitations}</span>}
               </Button>
-              <Button variant="ghost" size="icon" className="text-gray-600 hover:bg-gray-100 h-9 w-9" onClick={() => setIsMuted(m=>!m)}>
+              <Button variant="ghost" size="icon" className="text-gray-600 hover:bg-gray-100 h-9 w-9" onClick={() => { const newMuted = !isMuted; setIsMuted(newMuted); speechService.setMuted(newMuted); }}>
                 {isMuted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
               </Button>
               <Button size="sm" className="h-9 px-3 bg-red-600 hover:bg-red-700 text-white font-semibold" onClick={() => setShowEmergencyModal(true)}>
@@ -707,7 +711,7 @@ const ElderlyApp = () => {
                 onClick={handleVoiceCommand} disabled={isListening}>
                 <Mic className="h-4 w-4 mr-2" />{isListening ? 'Listening...' : 'Speak to Assistant'}
               </Button>
-              <Button variant="outline" className="h-10 border-indigo-300 text-indigo-700 hover:bg-indigo-100" onClick={() => setIsMuted(m=>!m)}>
+              <Button variant="outline" className="h-10 border-indigo-300 text-indigo-700 hover:bg-indigo-100" onClick={() => { const newMuted = !isMuted; setIsMuted(newMuted); speechService.setMuted(newMuted); }}>
                 {isMuted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
               </Button>
             </div>
@@ -769,6 +773,102 @@ const ElderlyApp = () => {
                 ))}
               </div>
             )}
+          {/* Booking flow UI */}
+            {bookingFlow.step && (
+              <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-xl">
+                <p className="text-xs font-semibold text-blue-700 mb-2">📅 Book Appointment</p>
+                {bookingFlow.step === 'date' && (
+                  <div className="space-y-2">
+                    <p className="text-sm text-gray-700">What date would you like?</p>
+                    <input type="date" min={new Date().toISOString().split('T')[0]}
+                      className="w-full border border-blue-300 rounded-lg px-3 py-2 text-sm bg-white"
+                      onChange={e => setBookingFlow(b => ({...b, date: e.target.value, step: 'time'}))}/>
+                  </div>
+                )}
+                {bookingFlow.step === 'time' && (
+                  <div className="space-y-2">
+                    <p className="text-sm text-gray-700">What time? (Date: {bookingFlow.date})</p>
+                    <input type="time" className="w-full border border-blue-300 rounded-lg px-3 py-2 text-sm bg-white"
+                      onChange={e => setBookingFlow(b => ({...b, time: e.target.value, step: 'type'}))}/>
+                  </div>
+                )}
+                {bookingFlow.step === 'type' && (
+                  <div className="space-y-2">
+                    <p className="text-sm text-gray-700">What type of visit?</p>
+                    <div className="flex flex-wrap gap-2">
+                      {['General Checkup','Follow-up','Consultation','Emergency','Other'].map(t => (
+                        <button key={t} onClick={() => setBookingFlow(b=>({...b, type:t, step:'confirm'}))}
+                          className="text-xs bg-white border border-blue-300 text-blue-700 px-3 py-1.5 rounded-full hover:bg-blue-50">
+                          {t}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {bookingFlow.step === 'confirm' && (
+                  <div className="space-y-2">
+                    <p className="text-sm text-gray-700 font-medium">Confirm appointment:</p>
+                    <p className="text-sm text-blue-800">📅 {bookingFlow.date} at {bookingFlow.time}</p>
+                    <p className="text-sm text-blue-800">🏥 {bookingFlow.type}</p>
+                    <div className="flex gap-2 mt-2">
+                      <button onClick={async () => {
+                        if (bookingFlow.date && bookingFlow.time && user) {
+                          const { addDoc, collection, serverTimestamp } = await import('firebase/firestore');
+                          await addDoc(collection(db, 'appointments'), {
+                            patientId: user.uid, patientName: profile?.name || '',
+                            date: bookingFlow.date, time: bookingFlow.time,
+                            type: bookingFlow.type?.toLowerCase().replace(' ','-') || 'checkup',
+                            title: bookingFlow.type, status: 'pending',
+                            doctor: doctors?.[0]?.name || '', createdAt: serverTimestamp()
+                          });
+                          setBookingFlow({step:null});
+                          setVoiceReply(`Appointment request sent for ${bookingFlow.date} at ${bookingFlow.time}. Your doctor will confirm it.`);
+                          if (!isMuted) speechService.speak(`Appointment booked for ${bookingFlow.date} at ${bookingFlow.time}!`);
+                        }
+                      }} className="flex-1 bg-blue-600 text-white text-sm font-semibold py-2 rounded-lg hover:bg-blue-700">
+                        ✅ Confirm
+                      </button>
+                      <button onClick={() => setBookingFlow({step:null})} className="px-4 border border-gray-300 text-gray-600 text-sm rounded-lg hover:bg-gray-50">
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Help panel */}
+            {showVoiceHelp && (
+              <div className="mt-3 bg-white rounded-xl border border-indigo-200 overflow-hidden">
+                <div className="flex items-center justify-between px-4 py-2.5 bg-indigo-50 border-b border-indigo-100">
+                  <p className="text-sm font-semibold text-indigo-800">All Voice Commands</p>
+                  <button onClick={() => setShowVoiceHelp(false)} className="text-indigo-400 hover:text-indigo-600 text-lg leading-none">×</button>
+                </div>
+                <div className="p-3 space-y-3 max-h-64 overflow-y-auto text-xs">
+                  {[
+                    { cat: '💊 Medicines', cmds: ['What is my next medicine?','List all my medicines','Mark medicine as taken','Skip this medicine','What medicines did I miss?','Check refill status','How to take this medicine?'] },
+                    { cat: '📅 Appointments', cmds: ['Book an appointment','Show my appointments','Next appointment details'] },
+                    { cat: '📞 Calls', cmds: ['Call caregiver','Video call caregiver','Call doctor','Video call doctor','Call 911'] },
+                    { cat: '🚨 Emergency', cmds: ['I fell down','Chest pain','SOS help me','I feel dizzy'] },
+                    { cat: '📊 Health Info', cmds: ['My adherence rate','My wellness score','Blood pressure tips','Blood sugar tips','Water intake tip','Sleep tips'] },
+                    { cat: '💬 General', cmds: ['Hello','How are you?','What time is it?','What is today's date?','Tell me a joke','Thank you','Goodbye'] },
+                  ].map(({cat, cmds}) => (
+                    <div key={cat}>
+                      <p className="font-semibold text-gray-600 mb-1">{cat}</p>
+                      <div className="flex flex-wrap gap-1">
+                        {cmds.map(c => (
+                          <button key={c} onClick={() => { setShowVoiceHelp(false); processVoiceInput(c); }}
+                            className="bg-indigo-50 text-indigo-700 border border-indigo-200 px-2 py-1 rounded-full hover:bg-indigo-100 transition-colors">
+                            {c}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
           </CardContent>
         </Card>
 

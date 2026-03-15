@@ -1,3 +1,4 @@
+import './version';
 import './lib/firebase-patcher';
 import './lib/firebase';
 import React from 'react';
