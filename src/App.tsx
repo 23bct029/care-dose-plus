@@ -16,6 +16,8 @@ import AddMedicine from '@/pages/AddMedicine';
 import AcceptInvite from '@/pages/AcceptInvite';
 import Connections from '@/pages/Connections';
 import AccessibilityToolbar from '@/components/AccessibilityToolbar';
+import GoogleFitCallback from '@/pages/GoogleFitCallback';
+import FitbitCallback from '@/pages/FitbitCallback';
 
 function App() {
   useEffect(() => {
@@ -85,6 +87,10 @@ function App() {
               <AddMedicine />
             </ProtectedRoute>
           } />
+
+          {/* Wearable OAuth callbacks */}
+          <Route path="/google-fit-callback" element={<GoogleFitCallback />} />
+          <Route path="/fitbit-callback" element={<FitbitCallback />} />
 
           {/* Catch-all: redirect to login */}
           <Route path="*" element={<Navigate to="/login" replace />} />

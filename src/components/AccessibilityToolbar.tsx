@@ -1,165 +1,147 @@
-// src/components/AccessibilityToolbar.tsx - Accessibility toolbar for elderly users
+// src/components/AccessibilityToolbar.tsx - Enhanced with more options
 import React, { useState, useEffect } from 'react';
-import { Button } from '@/components/ui/button';
-import { 
-  ZoomIn, ZoomOut, Sun, Eye, Settings, X, Minus, Plus,
-  Type, Monitor
-} from 'lucide-react';
+import { ZoomIn, ZoomOut, Sun, Eye, Settings, X, Type, Monitor, Volume2, VolumeX, Palette, Layout } from 'lucide-react';
 
-interface AccessibilitySettings {
+interface A11ySettings {
   fontSize: number;
   highContrast: boolean;
   reducedAnimation: boolean;
   largeButtons: boolean;
+  dyslexiaFont: boolean;
+  darkMode: boolean;
+  lineSpacing: boolean;
+  colorBlindMode: boolean;
   simplifiedUI: boolean;
 }
 
-const DEFAULT_SETTINGS: AccessibilitySettings = {
-  fontSize: 100,
-  highContrast: false,
-  reducedAnimation: false,
-  largeButtons: false,
-  simplifiedUI: false,
+const DEFAULTS: A11ySettings = {
+  fontSize: 100, highContrast: false, reducedAnimation: false,
+  largeButtons: false, dyslexiaFont: false, darkMode: false, lineSpacing: false,
 };
 
 const AccessibilityToolbar: React.FC = () => {
   const [open, setOpen] = useState(false);
-  const [settings, setSettings] = useState<AccessibilitySettings>(() => {
-    try {
-      const saved = sessionStorage.getItem('a11y');
-      return saved ? JSON.parse(saved) : DEFAULT_SETTINGS;
-    } catch { return DEFAULT_SETTINGS; }
+  const [settings, setSettings] = useState<A11ySettings>(() => {
+    try { const s = sessionStorage.getItem('a11y'); return s ? JSON.parse(s) : DEFAULTS; } catch { return DEFAULTS; }
   });
 
   useEffect(() => {
-    applySettings(settings);
+    apply(settings);
     try { sessionStorage.setItem('a11y', JSON.stringify(settings)); } catch {}
   }, [settings]);
 
-  const applySettings = (s: AccessibilitySettings) => {
-    const root = document.documentElement;
-    root.style.fontSize = `${s.fontSize}%`;
-    if (s.highContrast) {
-      root.classList.add('high-contrast');
-    } else {
-      root.classList.remove('high-contrast');
-    }
-    if (s.reducedAnimation) {
-      root.classList.add('reduced-motion');
-    } else {
-      root.classList.remove('reduced-motion');
-    }
-    if (s.largeButtons) {
-      root.classList.add('large-buttons');
-    } else {
-      root.classList.remove('large-buttons');
-    }
+  const apply = (s: A11ySettings) => {
+    const r = document.documentElement;
+    r.style.fontSize = `${s.fontSize}%`;
+    r.classList.toggle('high-contrast', s.highContrast);
+    r.classList.toggle('reduced-motion', s.reducedAnimation);
+    r.classList.toggle('large-buttons', s.largeButtons);
+    r.classList.toggle('dark', s.darkMode);
+    if (s.dyslexiaFont) r.style.fontFamily = '"OpenDyslexic", "Comic Sans MS", cursive';
+    else r.style.fontFamily = '';
+    if (s.lineSpacing) r.style.lineHeight = '2';
+    else r.style.lineHeight = '';
   };
 
-  const updateSetting = <K extends keyof AccessibilitySettings>(key: K, value: AccessibilitySettings[K]) => {
-    setSettings(prev => ({ ...prev, [key]: value }));
-  };
+  const set = <K extends keyof A11ySettings>(k: K, v: A11ySettings[K]) =>
+    setSettings(p => ({ ...p, [k]: v }));
 
-  const resetSettings = () => setSettings(DEFAULT_SETTINGS);
+  const reset = () => setSettings(DEFAULTS);
+
+  const Toggle = ({ label, desc, k }: { label: string; desc: string; k: keyof A11ySettings }) => (
+    <label className="flex items-start gap-3 p-2.5 rounded-xl hover:bg-gray-50 cursor-pointer transition-colors">
+      <div className="flex-shrink-0 mt-0.5">
+        <div className={`w-11 h-6 rounded-full transition-colors relative ${settings[k] ? 'bg-teal-600' : 'bg-gray-200'}`}>
+          <div className={`w-5 h-5 bg-white rounded-full shadow absolute top-0.5 transition-transform ${settings[k] ? 'translate-x-5' : 'translate-x-0.5'}`}/>
+        </div>
+      </div>
+      <div className="flex-1">
+        <p className="text-sm font-medium text-gray-800">{label}</p>
+        <p className="text-xs text-gray-500 mt-0.5">{desc}</p>
+      </div>
+      <input type="checkbox" className="sr-only" checked={!!settings[k]}
+        onChange={e => set(k, e.target.checked as any)} aria-label={label}/>
+    </label>
+  );
 
   return (
     <>
-      {/* Floating toggle button */}
       <button
         onClick={() => setOpen(o => !o)}
-        className="fixed bottom-6 right-6 z-50 w-14 h-14 bg-blue-600 hover:bg-blue-700 text-white rounded-full shadow-lg flex items-center justify-center transition-all focus:outline-none focus:ring-4 focus:ring-blue-300"
-        aria-label="Accessibility Settings"
+        className="fixed bottom-6 right-6 z-50 w-14 h-14 bg-teal-600 hover:bg-teal-700 text-white rounded-full shadow-xl flex items-center justify-center transition-all hover:scale-105 focus:outline-none focus:ring-4 focus:ring-teal-300"
+        aria-label="Accessibility & Display Settings"
         title="Accessibility Settings"
       >
         <Settings className="h-6 w-6" />
       </button>
 
-      {/* Panel */}
       {open && (
-        <div
-          className="fixed bottom-24 right-6 z-50 bg-white rounded-2xl shadow-2xl border border-gray-200 p-5 w-72"
-          role="dialog"
-          aria-label="Accessibility Settings Panel"
-        >
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="font-bold text-gray-900 flex items-center gap-2">
-              <Eye className="h-5 w-5 text-blue-600" />
-              Accessibility
-            </h3>
-            <button onClick={() => setOpen(false)} className="p-1 rounded-lg hover:bg-gray-100 text-gray-500">
-              <X className="h-4 w-4" />
+        <div className="fixed bottom-24 right-6 z-50 bg-white rounded-2xl shadow-2xl border border-gray-200 w-80 max-h-[80vh] overflow-y-auto"
+          role="dialog" aria-label="Accessibility Settings">
+          {/* Header */}
+          <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 sticky top-0 bg-white rounded-t-2xl">
+            <div className="flex items-center gap-2">
+              <div className="h-8 w-8 bg-teal-50 rounded-lg flex items-center justify-center"><Eye className="h-4 w-4 text-teal-600"/></div>
+              <h3 className="font-bold text-gray-900">Display Settings</h3>
+            </div>
+            <button onClick={() => setOpen(false)} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-600">
+              <X className="h-4 w-4"/>
             </button>
           </div>
 
-          {/* Font Size */}
-          <div className="mb-4">
-            <label className="text-sm font-medium text-gray-700 mb-2 block flex items-center gap-2">
-              <Type className="h-4 w-4 text-blue-500" />
-              Font Size ({settings.fontSize}%)
-            </label>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => updateSetting('fontSize', Math.max(80, settings.fontSize - 10))}
-                className="w-9 h-9 rounded-lg border border-gray-300 flex items-center justify-center hover:bg-gray-100 disabled:opacity-40 text-gray-700 font-bold"
-                disabled={settings.fontSize <= 80}
-                aria-label="Decrease font size"
-              >A-</button>
-              <div className="flex-1">
-                <input type="range" min={80} max={150} step={10} value={settings.fontSize}
-                  onChange={e => updateSetting('fontSize', parseInt(e.target.value))}
-                  className="w-full accent-blue-600" aria-label="Font size" />
+          <div className="px-4 py-4 space-y-4">
+            {/* Font Size */}
+            <div className="bg-gray-50 rounded-xl p-4">
+              <div className="flex items-center gap-2 mb-3">
+                <Type className="h-4 w-4 text-teal-600"/>
+                <span className="text-sm font-semibold text-gray-800">Text Size</span>
+                <span className="ml-auto text-sm font-bold text-teal-600">{settings.fontSize}%</span>
               </div>
-              <button
-                onClick={() => updateSetting('fontSize', Math.min(150, settings.fontSize + 10))}
-                className="w-9 h-9 rounded-lg border border-gray-300 flex items-center justify-center hover:bg-gray-100 disabled:opacity-40 text-gray-700 font-bold"
-                disabled={settings.fontSize >= 150}
-                aria-label="Increase font size"
-              >A+</button>
+              <div className="flex items-center gap-3">
+                <button onClick={() => set('fontSize', Math.max(80, settings.fontSize-10))}
+                  className="w-9 h-9 rounded-lg bg-white border border-gray-200 flex items-center justify-center hover:bg-gray-100 text-gray-700 font-bold disabled:opacity-40 shrink-0"
+                  disabled={settings.fontSize<=80}>A-</button>
+                <input type="range" min={80} max={150} step={10} value={settings.fontSize}
+                  onChange={e=>set('fontSize',parseInt(e.target.value))}
+                  className="flex-1 accent-teal-600" aria-label="Font size"/>
+                <button onClick={() => set('fontSize', Math.min(150, settings.fontSize+10))}
+                  className="w-9 h-9 rounded-lg bg-white border border-gray-200 flex items-center justify-center hover:bg-gray-100 text-gray-700 font-bold disabled:opacity-40 shrink-0"
+                  disabled={settings.fontSize>=150}>A+</button>
+              </div>
+              <div className="flex justify-between text-xs text-gray-400 mt-1 px-1">
+                <span>Smaller</span><span>Default</span><span>Larger</span>
+              </div>
+            </div>
+
+            {/* Toggle options */}
+            <div className="space-y-0.5">
+              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider px-2 mb-2">Visual Options</p>
+              <Toggle k="highContrast" label="High Contrast" desc="Increases text and border contrast"/>
+              <Toggle k="darkMode" label="Dark Mode" desc="Dark background, light text"/>
+              <Toggle k="largeButtons" label="Larger Buttons" desc="Bigger touch targets for easier tapping"/>
+              <Toggle k="lineSpacing" label="Extra Line Spacing" desc="More space between lines of text"/>
+              <Toggle k="dyslexiaFont" label="Dyslexia-Friendly Font" desc="Easier-to-read font for dyslexia"/>
+              <Toggle k="reducedAnimation" label="Reduce Animations" desc="Fewer moving elements on screen"/>
+            </div>
+
+            {/* Quick presets */}
+            <div className="bg-gray-50 rounded-xl p-4">
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Quick Presets</p>
+              <div className="grid grid-cols-2 gap-2">
+                {[
+                  { label:'Elderly Mode', action:()=>setSettings({...DEFAULTS,fontSize:130,largeButtons:true,lineSpacing:true}), color:'bg-amber-600' },
+                  { label:'Low Vision',   action:()=>setSettings({...DEFAULTS,fontSize:150,highContrast:true,largeButtons:true}), color:'bg-blue-600' },
+                  { label:'Night Mode',   action:()=>setSettings({...DEFAULTS,darkMode:true}), color:'bg-gray-800' },
+                  { label:'Reset All',    action:reset, color:'bg-gray-500' },
+                ].map(p=>(
+                  <button key={p.label} onClick={p.action}
+                    className={`${p.color} hover:opacity-90 text-white text-xs font-semibold py-2 px-3 rounded-lg transition-opacity`}>
+                    {p.label}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
-
-          {/* Toggle Options */}
-          <div className="space-y-3">
-            {[
-              { key: 'highContrast', label: 'High Contrast Mode', icon: Sun, desc: 'Increases color contrast' },
-              { key: 'reducedAnimation', label: 'Reduce Animations', icon: Monitor, desc: 'Fewer moving elements' },
-              { key: 'largeButtons', label: 'Larger Buttons', icon: ZoomIn, desc: 'Bigger touch targets' },
-            ].map(({ key, label, icon: Icon, desc }) => (
-              <label key={key} className="flex items-start gap-3 p-2 rounded-lg hover:bg-gray-50 cursor-pointer">
-                <div className="flex-shrink-0 mt-0.5">
-                  <div className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-colors ${
-                    settings[key as keyof AccessibilitySettings] ? 'bg-blue-600 border-blue-600' : 'border-gray-300'
-                  }`}>
-                    {settings[key as keyof AccessibilitySettings] && (
-                      <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                      </svg>
-                    )}
-                  </div>
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <Icon className="h-4 w-4 text-blue-500 flex-shrink-0" />
-                    <span className="text-sm font-medium text-gray-800">{label}</span>
-                  </div>
-                  <p className="text-xs text-gray-500 mt-0.5">{desc}</p>
-                </div>
-                <input type="checkbox" className="sr-only"
-                  checked={!!settings[key as keyof AccessibilitySettings]}
-                  onChange={e => updateSetting(key as keyof AccessibilitySettings, e.target.checked as any)}
-                  aria-label={label}
-                />
-              </label>
-            ))}
-          </div>
-
-          <button
-            onClick={resetSettings}
-            className="w-full mt-4 py-2 text-sm text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors border border-gray-200"
-            aria-label="Reset accessibility settings"
-          >
-            Reset to Defaults
-          </button>
         </div>
       )}
     </>

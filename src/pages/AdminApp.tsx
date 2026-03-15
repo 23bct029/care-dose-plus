@@ -1,1128 +1,573 @@
-// src/pages/AdminApp.tsx - SUBTLE GENTLE DARK THEME
+// src/pages/AdminApp.tsx - Professional clean UI, proper colors
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getCurrentUser, getUserProfile, logOut, getAllUsers } from '@/lib/firebase-auth';
 import { db, auth } from '@/lib/firebase';
-import { collection, query, getDocs, doc, updateDoc, deleteDoc, limit, addDoc } from 'firebase/firestore';
+import { collection, query, getDocs, doc, updateDoc, deleteDoc, setDoc, limit, addDoc, orderBy } from 'firebase/firestore';
 import { createUserWithEmailAndPassword } from 'firebase/auth';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { 
-  Shield, Users, Activity, AlertCircle,
-  Clock, Calendar, Bell, Download,
-  Search, Eye, CheckCircle,
-  XCircle, RefreshCw, 
-  Trash2, Edit, UserPlus, 
-  Phone, Mail, LogOut, 
-  Stethoscope, Heart, 
-  Database, Globe, Lock, Server,
-  Signal, SignalHigh, SignalMedium, SignalLow,
-  ToggleLeft, ToggleRight, User
+import {
+  Shield, Users, Activity, AlertCircle, Clock,
+  Search, Eye, CheckCircle, XCircle, RefreshCw,
+  Trash2, Edit, UserPlus, Phone, LogOut,
+  Stethoscope, Heart, Database, Globe, Lock, Server,
+  ToggleLeft, ToggleRight, User, Bell, TrendingUp,
+  FileText, Settings
 } from 'lucide-react';
 import EmergencyPopup from '@/components/EmergencyPopup';
 import ProfileTab from '@/components/ProfileTab';
 
-interface UserLog {
-  id: string;
-  userId: string;
-  userEmail: string;
-  action: string;
-  level: string;
-  timestamp: string;
-  details?: any;
-  page?: string;
-}
+interface UserLog { id:string; userId:string; userEmail:string; action:string; level:string; timestamp:string; details?:any; page?:string; }
+
+const ROLE_CONFIG: Record<string,{color:string;bg:string;border:string;dot:string}> = {
+  admin:    {color:'text-violet-700', bg:'bg-violet-50',  border:'border-violet-200', dot:'bg-violet-500'},
+  doctor:   {color:'text-blue-700',   bg:'bg-blue-50',    border:'border-blue-200',   dot:'bg-blue-500'},
+  caregiver:{color:'text-teal-700',   bg:'bg-teal-50',    border:'border-teal-200',   dot:'bg-teal-500'},
+  elderly:  {color:'text-amber-700',  bg:'bg-amber-50',   border:'border-amber-200',  dot:'bg-amber-500'},
+};
 
 const AdminApp = () => {
   const [user, setUser] = useState<any>(null);
   const [profile, setProfile] = useState<any>(null);
   const [allUsers, setAllUsers] = useState<any[]>([]);
-  
-  // Store all system logs grouped by user
-  const [logsByUser, setLogsByUser] = useState<Record<string, UserLog[]>>({});
+  const [logsByUser, setLogsByUser] = useState<Record<string,UserLog[]>>({});
   const [selectedUserLogs, setSelectedUserLogs] = useState<UserLog[]>([]);
-  
-  const [systemHealth, setSystemHealth] = useState({
-    database: 'healthy',
-    auth: 'healthy',
-    storage: 'healthy',
-    api: 'healthy',
-    lastChecked: new Date().toISOString()
-  });
-  
-  const [stats, setStats] = useState({
-    totalUsers: 4,
-    activeToday: 0,
-    totalEmergencies: 2,
-    resolvedEmergencies: 2,
-    totalMedicines: 0,
-    totalAppointments: 0,
-    caregivers: 1,
-    elderly: 1,
-    doctors: 1,
-    admins: 1
-  });
-  
-  const [userSearchTerm, setUserSearchTerm] = useState('');
-  const [logSearchTerm, setLogSearchTerm] = useState('');
+  const [systemHealth, setSystemHealth] = useState({ database:'healthy', auth:'healthy', api:'healthy', storage:'healthy', lastChecked:new Date().toISOString() });
+  const [stats, setStats] = useState({ totalUsers:0, activeToday:0, totalEmergencies:0, resolvedEmergencies:0, caregivers:0, elderly:0, doctors:0, admins:0 });
+  const [userSearch, setUserSearch] = useState('');
+  const [logSearch, setLogSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [selectedUser, setSelectedUser] = useState<any>(null);
   const [showUserModal, setShowUserModal] = useState(false);
-  const [showAddUserModal, setShowAddUserModal] = useState(false);
+  const [showAddModal, setShowAddModal] = useState(false);
   const [showLogsModal, setShowLogsModal] = useState(false);
   const [emergencies, setEmergencies] = useState<any[]>([]);
-  
-  // New user form state
-  const [newUser, setNewUser] = useState({
-    name: '',
-    email: '',
-    password: '',
-    phone: '',
-    role: 'elderly'
-  });
-
+  const [newUser, setNewUser] = useState({ name:'', email:'', password:'', phone:'', role:'elderly' });
   const navigate = useNavigate();
 
   useEffect(() => {
-    loadAdminData();
-    
-    // Set up real-time health checks
-    const healthInterval = setInterval(checkSystemHealth, 30000);
-    return () => clearInterval(healthInterval);
+    loadData();
+    const h = setInterval(checkHealth, 30000);
+    return () => clearInterval(h);
   }, []);
 
-  const loadAdminData = async () => {
+  const loadData = async () => {
     setLoading(true);
     try {
-      const currentUser = await getCurrentUser();
-      if (!currentUser) {
-        navigate('/login');
-        return;
-      }
-      setUser(currentUser);
+      const cu = await getCurrentUser();
+      if (!cu) { navigate('/login'); return; }
+      setUser(cu);
+      setProfile(await getUserProfile(cu.uid));
+      const users = await getAllUsers() || [];
+      setAllUsers(users);
 
-      const userProfile = await getUserProfile(currentUser.uid);
-      setProfile(userProfile);
+      const eSnap = await getDocs(query(collection(db,'emergencies'), limit(200)));
+      const eData = eSnap.docs.map(d=>({id:d.id,...d.data()})).sort((a:any,b:any)=>(b.timestamp?.toMillis?.()||0)-(a.timestamp?.toMillis?.()||0));
+      setEmergencies(eData);
 
-      // Get all users with profiles
-      const usersList = await getAllUsers();
-      setAllUsers(usersList || []);
+      await loadLogs();
 
-      // Get all emergencies
-      const emergenciesRef = collection(db, 'emergencies');
-      const emergenciesQuery = query(emergenciesRef, limit(100));
-      const emergenciesSnap = await getDocs(emergenciesQuery);
-      
-      const emergenciesData: any[] = [];
-      emergenciesSnap.forEach((doc) => {
-        emergenciesData.push({ id: doc.id, ...doc.data() });
-      });
-      setEmergencies(emergenciesData.sort((a, b) => {
-        const aT = a.createdAt?.toMillis?.() || a.timestamp?.toMillis?.() || 0;
-        const bT = b.createdAt?.toMillis?.() || b.timestamp?.toMillis?.() || 0;
-        return bT - aT;
-      }));
-
-      // Load all system logs and group by user
-      await loadAllSystemLogs();
-
-      // Calculate stats
-      const userRoles = usersList?.reduce((acc: any, user: any) => {
-        if (user.role === 'caregiver') acc.caregivers++;
-        else if (user.role === 'elderly') acc.elderly++;
-        else if (user.role === 'doctor') acc.doctors++;
-        else if (user.role === 'admin') acc.admins++;
-        return acc;
-      }, { caregivers: 0, elderly: 0, doctors: 0, admins: 0 }) || {};
-
-      setStats({
-        totalUsers: usersList?.length || 4,
-        activeToday: 0,
-        totalEmergencies: emergenciesData?.length || 2,
-        resolvedEmergencies: emergenciesData?.filter((e: any) => e.status === 'resolved').length || 2,
-        totalMedicines: 0,
-        totalAppointments: 0,
-        ...userRoles
-      });
-
-    } catch (error: any) {
-      console.error('Error loading admin data:', error);
-    } finally {
-      setLoading(false);
-    }
+      const roles = users.reduce((acc:any,u:any) => { acc[u.role]=(acc[u.role]||0)+1; return acc; },{});
+      setStats({ totalUsers:users.length, activeToday:0, totalEmergencies:eData.length, resolvedEmergencies:eData.filter((e:any)=>e.status==='resolved').length, caregivers:roles.caregiver||0, elderly:roles.elderly||0, doctors:roles.doctor||0, admins:roles.admin||0 });
+    } catch(e) { console.error(e); }
+    finally { setLoading(false); }
   };
 
-  // Load all system logs and group by user
-  const loadAllSystemLogs = async () => {
+  const loadLogs = async () => {
     try {
-      const logsRef = collection(db, 'system_logs');
-      const q = query(logsRef, limit(500));
-      const querySnapshot = await getDocs(q);
-      
-      const groupedLogs: Record<string, UserLog[]> = {};
-      
-      querySnapshot.forEach((doc) => {
-        const log = { id: doc.id, ...doc.data() } as UserLog;
-        
-        // Group by userId
-        if (log.userId) {
-          if (!groupedLogs[log.userId]) {
-            groupedLogs[log.userId] = [];
-          }
-          groupedLogs[log.userId].push(log);
-        }
+      const snap = await getDocs(query(collection(db,'system_logs'), limit(500)));
+      const grouped: Record<string,UserLog[]> = {};
+      snap.forEach(d => {
+        const log = {id:d.id,...d.data()} as UserLog;
+        if (log.userId) { if (!grouped[log.userId]) grouped[log.userId]=[]; grouped[log.userId].push(log); }
       });
-      
-      setLogsByUser(groupedLogs);
-    } catch (error) {
-      console.error('Error loading system logs:', error);
-    }
-  };
-
-  // Get logs for a specific user
-  const getUserLogs = (userId: string): UserLog[] => {
-    return logsByUser[userId] || [];
-  };
-
-  const handleViewLogs = (user: any) => {
-    setSelectedUser(user);
-    const userLogs = getUserLogs(user.uid);
-    setSelectedUserLogs(userLogs);
-    setShowLogsModal(true);
+      setLogsByUser(grouped);
+    } catch {}
   };
 
   const handleAddUser = async () => {
-    if (!newUser.name || !newUser.email || !newUser.password) {
-      alert('Please fill in all required fields');
-      return;
-    }
-
+    if (!newUser.name||!newUser.email||!newUser.password) { alert('Please fill all required fields'); return; }
     try {
-      const userCredential = await createUserWithEmailAndPassword(auth, newUser.email, newUser.password);
-      const newUid = userCredential.user.uid;
-
-      const userRef = doc(db, 'users', newUid);
-      await updateDoc(userRef, {
-        uid: newUid,
-        name: newUser.name,
-        email: newUser.email,
-        phone: newUser.phone || '',
-        role: newUser.role,
-        isActive: true,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      });
-
-      await addDoc(collection(db, 'system_logs'), {
-        userId: user?.uid,
-        userEmail: user?.email,
-        action: `Created new user: ${newUser.name} (${newUser.role})`,
-        level: 'info',
-        timestamp: new Date().toISOString()
-      });
-
-      setNewUser({
-        name: '',
-        email: '',
-        password: '',
-        phone: '',
-        role: 'elderly'
-      });
-      setShowAddUserModal(false);
-      
-      loadAdminData();
-
-    } catch (error: any) {
-      console.error('Error creating user:', error);
-      alert('Error creating user: ' + error.message);
-    }
+      const cred = await createUserWithEmailAndPassword(auth, newUser.email, newUser.password);
+      await setDoc(doc(db,'users',cred.user.uid), { uid:cred.user.uid, name:newUser.name, email:newUser.email, phone:newUser.phone||'', role:newUser.role, isActive:true, createdAt:new Date().toISOString(), updatedAt:new Date().toISOString() });
+      await addDoc(collection(db,'system_logs'), { userId:user?.uid, userEmail:user?.email, action:`Created user: ${newUser.name} (${newUser.role})`, level:'info', timestamp:new Date().toISOString() });
+      setNewUser({name:'',email:'',password:'',phone:'',role:'elderly'});
+      setShowAddModal(false);
+      loadData();
+    } catch(e:any) { alert('Error: '+e.message); }
   };
 
-  const handleToggleUserStatus = async (userId: string, currentStatus: boolean) => {
+  const handleDeleteUser = async (uid: string) => {
+    if (!confirm('Delete this user? This cannot be undone.')) return;
     try {
-      const userRef = doc(db, 'users', userId);
-      await updateDoc(userRef, {
-        isActive: !currentStatus,
-        updatedAt: new Date().toISOString()
-      });
-      
-      setAllUsers(prev => 
-        prev.map(u => u.uid === userId ? { ...u, isActive: !currentStatus } : u)
-      );
-      
-      await addDoc(collection(db, 'system_logs'), {
-        userId: user?.uid,
-        userEmail: user?.email,
-        action: `Toggled user status to ${!currentStatus ? 'active' : 'inactive'}`,
-        level: 'info',
-        timestamp: new Date().toISOString()
-      });
-    } catch (error) {
-      console.error('Error toggling user status:', error);
-    }
+      await deleteDoc(doc(db,'users',uid));
+      setAllUsers(prev=>prev.filter(u=>u.uid!==uid));
+    } catch(e:any) { alert('Error: '+e.message); }
   };
 
-  const handleUpdateUserRole = async (userId: string, newRole: string) => {
-    try {
-      const userRef = doc(db, 'users', userId);
-      await updateDoc(userRef, {
-        role: newRole,
-        updatedAt: new Date().toISOString()
-      });
-
-      setAllUsers(prev => 
-        prev.map(u => u.uid === userId ? { ...u, role: newRole } : u)
-      );
-
-      await addDoc(collection(db, 'system_logs'), {
-        userId: user?.uid,
-        userEmail: user?.email,
-        action: `Updated user role to ${newRole}`,
-        level: 'info',
-        timestamp: new Date().toISOString()
-      });
-    } catch (error: any) {
-      console.error('Error updating user role:', error);
-    }
+  const handleToggleStatus = async (uid: string, current: boolean) => {
+    await updateDoc(doc(db,'users',uid), { isActive:!current, updatedAt:new Date().toISOString() });
+    setAllUsers(prev=>prev.map(u=>u.uid===uid?{...u,isActive:!current}:u));
+    if (selectedUser?.uid===uid) setSelectedUser((prev:any)=>({...prev,isActive:!current}));
   };
 
-  const handleDeleteUser = async (userId: string) => {
-    if (!confirm('Are you sure you want to delete this user? This action cannot be undone.')) return;
-
-    try {
-      const userRef = doc(db, 'users', userId);
-      await deleteDoc(userRef);
-
-      setAllUsers(prev => prev.filter(u => u.uid !== userId));
-      
-      await addDoc(collection(db, 'system_logs'), {
-        userId: user?.uid,
-        userEmail: user?.email,
-        action: 'Deleted user',
-        level: 'warning',
-        timestamp: new Date().toISOString()
-      });
-    } catch (error: any) {
-      console.error('Error deleting user:', error);
-    }
+  const handleUpdateRole = async (uid: string, role: string) => {
+    await updateDoc(doc(db,'users',uid), { role, updatedAt:new Date().toISOString() });
+    setAllUsers(prev=>prev.map(u=>u.uid===uid?{...u,role}:u));
+    if (selectedUser?.uid===uid) setSelectedUser((prev:any)=>({...prev,role}));
   };
 
-  const handleResolveEmergency = async (emergencyId: string) => {
-    try {
-      const emergencyRef = doc(db, 'emergencies', emergencyId);
-      await updateDoc(emergencyRef, {
-        status: 'resolved',
-        resolvedAt: new Date().toISOString(),
-        resolvedBy: user?.uid
-      });
-
-      setEmergencies(prev => 
-        prev.map(e => e.id === emergencyId ? { ...e, status: 'resolved' } : e)
-      );
-
-      await addDoc(collection(db, 'system_logs'), {
-        userId: user?.uid,
-        userEmail: user?.email,
-        action: 'Resolved emergency',
-        level: 'info',
-        timestamp: new Date().toISOString()
-      });
-    } catch (error: any) {
-      console.error('Error resolving emergency:', error);
-    }
+  const handleResolveEmergency = async (id: string) => {
+    await updateDoc(doc(db,'emergencies',id), { status:'resolved', resolvedAt:new Date().toISOString(), resolvedBy:user?.uid });
+    setEmergencies(prev=>prev.map(e=>e.id===id?{...e,status:'resolved'}:e));
   };
 
-  const checkSystemHealth = async () => {
-    try {
-      const healthCheck = {
-        database: 'healthy',
-        auth: 'healthy',
-        storage: 'healthy',
-        api: 'healthy',
-        lastChecked: new Date().toISOString()
-      };
-
-      try {
-        await getDocs(query(collection(db, 'system_logs'), limit(1)));
-      } catch {
-        healthCheck.database = 'degraded';
-      }
-
-      try {
-        const currentUser = await getCurrentUser();
-        if (!currentUser) healthCheck.auth = 'degraded';
-      } catch {
-        healthCheck.auth = 'degraded';
-      }
-
-      setSystemHealth(healthCheck);
-    } catch (error) {
-      console.error('Health check failed:', error);
-    }
+  const checkHealth = async () => {
+    const h:any = { database:'healthy', auth:'healthy', api:'healthy', storage:'healthy', lastChecked:new Date().toISOString() };
+    try { await getDocs(query(collection(db,'system_logs'),limit(1))); } catch { h.database='degraded'; }
+    try { const cu=await getCurrentUser(); if (!cu) h.auth='degraded'; } catch { h.auth='degraded'; }
+    setSystemHealth(h);
   };
 
-  const handleLogout = async () => {
-    try {
-      await logOut();
-      navigate('/login');
-    } catch (error) {
-      console.error('Logout error:', error);
-    }
-  };
+  const handleLogout = async () => { await logOut(); navigate('/login'); };
 
-  const getRoleBadgeColor = (role: string) => {
-    switch(role) {
-      case 'admin': return 'bg-purple-900/80 text-purple-100 border border-purple-700/50';
-      case 'doctor': return 'bg-blue-900/80 text-blue-100 border border-blue-700/50';
-      case 'caregiver': return 'bg-green-900/80 text-green-100 border border-green-700/50';
-      case 'elderly': return 'bg-amber-900/80 text-amber-100 border border-amber-700/50';
-      default: return 'bg-gray-800 text-gray-300 border border-gray-700';
-    }
-  };
+  const filteredUsers = allUsers.filter(u=>u.name?.toLowerCase().includes(userSearch.toLowerCase())||u.email?.toLowerCase().includes(userSearch.toLowerCase()));
+  const filteredLogUsers = allUsers.filter(u=>u.name?.toLowerCase().includes(logSearch.toLowerCase())||u.email?.toLowerCase().includes(logSearch.toLowerCase()));
 
-  const getLogLevelBadge = (level: string) => {
-    switch(level) {
-      case 'error': return <Badge className="bg-red-900/80 text-red-100 border border-red-700/50">Error</Badge>;
-      case 'warning': return <Badge className="bg-yellow-900/80 text-yellow-100 border border-yellow-700/50">Warning</Badge>;
-      case 'info': return <Badge className="bg-blue-900/80 text-blue-100 border border-blue-700/50">Info</Badge>;
-      default: return <Badge className="bg-gray-800 text-gray-300 border border-gray-700">Log</Badge>;
-    }
-  };
+  const rc = (role: string) => ROLE_CONFIG[role]||ROLE_CONFIG.elderly;
 
-  // Signal icons for health status
-  const getHealthIcon = (status: string) => {
-    if (status === 'healthy') {
-      return <SignalHigh className="h-4 w-4 text-emerald-400" />;
-    } else {
-      return <SignalLow className="h-4 w-4 text-rose-400" />;
-    }
-  };
-
-  const filteredUsers = allUsers.filter(u => 
-    u.name?.toLowerCase().includes(userSearchTerm.toLowerCase()) ||
-    u.email?.toLowerCase().includes(userSearchTerm.toLowerCase())
-  );
-
-  const filteredLogUsers = allUsers.filter(u => 
-    u.name?.toLowerCase().includes(logSearchTerm.toLowerCase()) ||
-    u.email?.toLowerCase().includes(logSearchTerm.toLowerCase())
-  );
-
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-16 w-16 border-4 border-indigo-500/30 border-t-indigo-400 mx-auto"></div>
-          <p className="mt-4 text-lg text-slate-300">Loading admin dashboard...</p>
-        </div>
+  if (loading) return (
+    <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="text-center">
+        <div className="animate-spin rounded-full h-14 w-14 border-4 border-teal-600 border-t-transparent mx-auto"></div>
+        <p className="mt-4 text-gray-600">Loading admin dashboard...</p>
       </div>
-    );
-  }
+    </div>
+  );
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950">
-      {/* Header */}
-      <header className="bg-slate-900/80 backdrop-blur-md border-b border-slate-800/50 sticky top-0 z-10">
-        <div className="container mx-auto px-6 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              <div className="p-2.5 bg-indigo-900/60 rounded-lg shadow-lg backdrop-blur-sm border border-indigo-700/30">
-                <Shield className="h-6 w-6 text-indigo-300" />
-              </div>
-              <div>
-                <h1 className="text-2xl font-bold text-slate-100 tracking-tight">Welcome, {profile?.name?.split(' ')[0] || 'Admin'}!</h1>
-                <p className="text-sm text-slate-400 mt-0.5">Admin Dashboard • System Monitoring & Control</p>
-              </div>
-            </div>
+    <div className="min-h-screen bg-gray-50">
+      {/* Sidebar + Content layout */}
+      <div className="flex min-h-screen">
+
+        {/* Left sidebar */}
+        <aside className="w-64 bg-gray-900 text-white flex flex-col shrink-0 hidden lg:flex">
+          {/* Brand */}
+          <div className="px-6 py-5 border-b border-gray-700">
             <div className="flex items-center gap-3">
-              {/* System Health Indicators */}
-              <div className="flex items-center gap-4 bg-slate-800/50 rounded-lg px-4 py-2 border border-slate-700/50 backdrop-blur-sm">
-                <div className="flex items-center gap-1.5">
-                  {getHealthIcon(systemHealth.database)}
-                  <span className="text-xs font-medium text-slate-300">DB</span>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  {getHealthIcon(systemHealth.auth)}
-                  <span className="text-xs font-medium text-slate-300">Auth</span>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  {getHealthIcon(systemHealth.api)}
-                  <span className="text-xs font-medium text-slate-300">API</span>
-                </div>
+              <div className="h-9 w-9 rounded-lg bg-teal-500 flex items-center justify-center"><Shield className="h-5 w-5 text-white"/></div>
+              <div>
+                <p className="font-bold text-white">CareDose+</p>
+                <p className="text-xs text-gray-400">Admin Console</p>
               </div>
-              
-              <Button 
-                variant="outline" 
-                size="sm" 
-                className="border-slate-700 text-slate-300 hover:bg-slate-800 hover:text-white transition-all px-4 py-2 h-9 bg-slate-800/30 backdrop-blur-sm"
-                onClick={loadAdminData}
-              >
-                <RefreshCw className="h-4 w-4 mr-2" />
-                Refresh
-              </Button>
-              
-              <Button 
-                variant="outline" 
-                size="icon" 
-                onClick={handleLogout} 
-                className="border-slate-700 text-slate-300 hover:bg-rose-900/30 hover:text-rose-300 h-9 w-9 bg-slate-800/30 backdrop-blur-sm"
-              >
-                <LogOut className="h-4 w-4" />
-              </Button>
             </div>
           </div>
-        </div>
-      </header>
 
-      <main className="container mx-auto px-6 py-8 space-y-8">
-        {/* Stats Cards - SUBTLE GENTLE GRADIENTS */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-4">
-          <Card className="bg-gradient-to-br from-slate-800/90 to-slate-900/90 text-white border-0 shadow-xl backdrop-blur-sm border border-slate-700/30">
-            <CardContent className="p-5 flex flex-col items-center justify-center min-h-[140px]">
-              <Users className="h-8 w-8 text-blue-400/80 mb-2" />
-              <p className="text-3xl font-bold text-slate-100">{stats.totalUsers}</p>
-              <p className="text-xs text-blue-300/70 font-medium">Total Users</p>
-            </CardContent>
-          </Card>
-
-          <Card className="bg-gradient-to-br from-slate-800/90 to-slate-900/90 text-white border-0 shadow-xl backdrop-blur-sm border border-slate-700/30">
-            <CardContent className="p-5 flex flex-col items-center justify-center min-h-[140px]">
-              <Activity className="h-8 w-8 text-emerald-400/80 mb-2" />
-              <p className="text-3xl font-bold text-slate-100">{stats.activeToday}</p>
-              <p className="text-xs text-emerald-300/70 font-medium">Active Today</p>
-            </CardContent>
-          </Card>
-
-          <Card className="bg-gradient-to-br from-slate-800/90 to-slate-900/90 text-white border-0 shadow-xl backdrop-blur-sm border border-slate-700/30">
-            <CardContent className="p-5 flex flex-col items-center justify-center min-h-[140px]">
-              <Heart className="h-8 w-8 text-amber-400/80 mb-2" />
-              <p className="text-3xl font-bold text-slate-100">{stats.elderly}</p>
-              <p className="text-xs text-amber-300/70 font-medium">Elderly</p>
-            </CardContent>
-          </Card>
-
-          <Card className="bg-gradient-to-br from-slate-800/90 to-slate-900/90 text-white border-0 shadow-xl backdrop-blur-sm border border-slate-700/30">
-            <CardContent className="p-5 flex flex-col items-center justify-center min-h-[140px]">
-              <Users className="h-8 w-8 text-emerald-400/80 mb-2" />
-              <p className="text-3xl font-bold text-slate-100">{stats.caregivers}</p>
-              <p className="text-xs text-emerald-300/70 font-medium">Caregivers</p>
-            </CardContent>
-          </Card>
-
-          <Card className="bg-gradient-to-br from-slate-800/90 to-slate-900/90 text-white border-0 shadow-xl backdrop-blur-sm border border-slate-700/30">
-            <CardContent className="p-5 flex flex-col items-center justify-center min-h-[140px]">
-              <Stethoscope className="h-8 w-8 text-blue-400/80 mb-2" />
-              <p className="text-3xl font-bold text-slate-100">{stats.doctors}</p>
-              <p className="text-xs text-blue-300/70 font-medium">Doctors</p>
-            </CardContent>
-          </Card>
-
-          <Card className="bg-gradient-to-br from-slate-800/90 to-slate-900/90 text-white border-0 shadow-xl backdrop-blur-sm border border-slate-700/30">
-            <CardContent className="p-5 flex flex-col items-center justify-center min-h-[140px]">
-              <Shield className="h-8 w-8 text-purple-400/80 mb-2" />
-              <p className="text-3xl font-bold text-slate-100">{stats.admins}</p>
-              <p className="text-xs text-purple-300/70 font-medium">Admins</p>
-            </CardContent>
-          </Card>
-
-          <Card className="bg-gradient-to-br from-slate-800/90 to-slate-900/90 text-white border-0 shadow-xl backdrop-blur-sm border border-slate-700/30">
-            <CardContent className="p-5 flex flex-col items-center justify-center min-h-[140px]">
-              <AlertCircle className="h-8 w-8 text-rose-400/80 mb-2" />
-              <p className="text-3xl font-bold text-slate-100">{stats.totalEmergencies}</p>
-              <p className="text-xs text-rose-300/70 font-medium">Emergencies</p>
-            </CardContent>
-          </Card>
-
-          <Card className="bg-gradient-to-br from-slate-800/90 to-slate-900/90 text-white border-0 shadow-xl backdrop-blur-sm border border-slate-700/30">
-            <CardContent className="p-5 flex flex-col items-center justify-center min-h-[140px]">
-              <CheckCircle className="h-8 w-8 text-teal-400/80 mb-2" />
-              <p className="text-3xl font-bold text-slate-100">{stats.resolvedEmergencies}</p>
-              <p className="text-xs text-teal-300/70 font-medium">Resolved</p>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Tabs */}
-        <Tabs defaultValue="users" className="space-y-6">
-          <div className="overflow-x-auto">
-          <TabsList className="bg-slate-800/50 border border-slate-700/50 p-1 rounded-lg min-w-full flex h-auto backdrop-blur-sm">
-            <TabsTrigger value="users" className="text-slate-400 data-[state=active]:bg-indigo-900/60 data-[state=active]:text-indigo-100 flex-1 min-w-[130px] rounded-md text-sm font-medium transition-all py-3 flex items-center justify-center gap-1.5 whitespace-nowrap">
-              <Users className="h-3.5 w-3.5 shrink-0" />
-              User Management
-            </TabsTrigger>
-            <TabsTrigger value="logs" className="text-slate-400 data-[state=active]:bg-indigo-900/60 data-[state=active]:text-indigo-100 flex-1 min-w-[120px] rounded-md text-sm font-medium transition-all py-3 flex items-center justify-center gap-1.5 whitespace-nowrap">
-              <Activity className="h-3.5 w-3.5 shrink-0" />
-              Activity Logs
-            </TabsTrigger>
-            <TabsTrigger value="emergencies" className="text-slate-400 data-[state=active]:bg-indigo-900/60 data-[state=active]:text-indigo-100 flex-1 min-w-[140px] rounded-md text-sm font-medium transition-all py-3 flex items-center justify-center gap-1.5 whitespace-nowrap">
-              <AlertCircle className="h-3.5 w-3.5 shrink-0" />
-              Emergency Alerts
-            </TabsTrigger>
-            <TabsTrigger value="analytics" className="text-slate-400 data-[state=active]:bg-indigo-900/60 data-[state=active]:text-indigo-100 flex-1 min-w-[100px] rounded-md text-sm font-medium transition-all py-3 flex items-center justify-center gap-1.5 whitespace-nowrap">
-              <Activity className="h-3.5 w-3.5 shrink-0" />
-              Analytics
-            </TabsTrigger>
-            <TabsTrigger value="system" className="text-slate-400 data-[state=active]:bg-indigo-900/60 data-[state=active]:text-indigo-100 flex-1 min-w-[120px] rounded-md text-sm font-medium transition-all py-3 flex items-center justify-center gap-1.5 whitespace-nowrap">
-              <Server className="h-3.5 w-3.5 shrink-0" />
-              System Health
-            </TabsTrigger>
-            <TabsTrigger value="profile" className="text-slate-400 data-[state=active]:bg-indigo-900/60 data-[state=active]:text-indigo-100 flex-1 min-w-[100px] rounded-md text-sm font-medium transition-all py-3 flex items-center justify-center gap-1.5 whitespace-nowrap">
-              <User className="h-3.5 w-3.5 shrink-0" />
-              Profile
-            </TabsTrigger>
-          </TabsList>
+          {/* Admin info */}
+          <div className="px-6 py-4 border-b border-gray-700">
+            <div className="flex items-center gap-3">
+              <div className="h-9 w-9 rounded-full bg-violet-600 flex items-center justify-center font-bold text-sm">{profile?.name?.charAt(0)||'A'}</div>
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-white truncate">{profile?.name||'Admin'}</p>
+                <p className="text-xs text-gray-400 truncate">{user?.email}</p>
+              </div>
+            </div>
           </div>
 
-          {/* User Management Tab */}
-          <TabsContent value="users">
-            <Card className="bg-slate-900/50 backdrop-blur-sm border border-slate-800/50 shadow-xl">
-              <CardHeader className="pb-4">
-                <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
-                  <CardTitle className="text-slate-100 text-xl font-semibold">User Management</CardTitle>
-                  <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
-                    <div className="relative w-full sm:w-64">
-                      <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-slate-500" />
-                      <Input
-                        placeholder="Search users..."
-                        value={userSearchTerm}
-                        onChange={(e) => setUserSearchTerm(e.target.value)}
-                        className="pl-9 bg-slate-800/50 border-slate-700 text-slate-200 placeholder:text-slate-500 w-full h-10 rounded-lg"
-                      />
-                    </div>
-                    <Button 
-                      className="bg-emerald-900/60 hover:bg-emerald-800/60 text-emerald-100 border border-emerald-700/30 w-full sm:w-auto h-10 px-4 rounded-lg transition-colors backdrop-blur-sm"
-                      onClick={() => setShowAddUserModal(true)}
-                    >
-                      <UserPlus className="h-4 w-4 mr-2" />
-                      Add User
-                    </Button>
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent className="pt-0">
-                <div className="space-y-4">
-                  {filteredUsers.map((user) => (
-                    <div key={user.uid} className="p-5 bg-slate-800/30 rounded-xl border border-slate-700/50 hover:bg-slate-800/40 transition-all backdrop-blur-sm">
-                      <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
-                        <div className="flex items-start gap-4">
-                          <Avatar className="h-14 w-14 border-2 border-indigo-500/30">
-                            <AvatarFallback className="bg-gradient-to-br from-indigo-900/80 to-purple-900/80 text-indigo-100 text-lg">
-                              {user.name?.charAt(0)}
-                            </AvatarFallback>
-                          </Avatar>
-                          <div className="space-y-2">
-                            <div>
-                              <p className="text-slate-100 font-semibold text-lg">{user.name}</p>
-                              <p className="text-sm text-slate-400">{user.email}</p>
-                              {user.phone && (
-                                <p className="text-xs text-slate-500 mt-1 flex items-center gap-1">
-                                  <Phone className="h-3 w-3" />
-                                  {user.phone}
-                                </p>
-                              )}
-                            </div>
-                            <div className="flex flex-wrap gap-2">
-                              <Badge className={getRoleBadgeColor(user.role)}>{user.role}</Badge>
-                              <Badge variant="outline" className="border-slate-600 text-slate-300 bg-slate-800/30">
-                                Joined {new Date(user.createdAt).toLocaleDateString()}
-                              </Badge>
-                              {user.isActive === false ? (
-                                <Badge className="bg-slate-700 text-slate-300 border border-slate-600">Inactive</Badge>
-                              ) : (
-                                <Badge className="bg-emerald-900/60 text-emerald-100 border border-emerald-700/30">Active</Badge>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                        
-                        <div className="flex gap-2">
-                          <Button 
-                            size="sm"
-                            className="bg-amber-900/60 hover:bg-amber-800/60 text-amber-100 border border-amber-700/30 h-9 px-4 rounded-lg transition-colors backdrop-blur-sm"
-                            onClick={() => {
-                              setSelectedUser(user);
-                              setShowUserModal(true);
-                            }}
-                          >
-                            <Edit className="h-4 w-4 mr-2" />
-                            Edit
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="destructive"
-                            className="bg-rose-900/60 hover:bg-rose-800/60 text-rose-100 border border-rose-700/30 h-9 px-4 rounded-lg transition-colors backdrop-blur-sm"
-                            onClick={() => handleDeleteUser(user.uid)}
-                          >
-                            <Trash2 className="h-4 w-4 mr-2" />
-                            Delete
-                          </Button>
-                        </div>
+          {/* System Health */}
+          <div className="px-6 py-4 border-b border-gray-700">
+            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">System Status</p>
+            {[['Database',systemHealth.database],['Auth',systemHealth.auth],['API',systemHealth.api]].map(([name,status])=>(
+              <div key={name} className="flex items-center justify-between mb-2">
+                <span className="text-sm text-gray-300">{name}</span>
+                <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${status==='healthy'?'bg-emerald-900 text-emerald-300':'bg-red-900 text-red-300'}`}>{status}</span>
+              </div>
+            ))}
+          </div>
+
+          {/* Stats summary */}
+          <div className="px-6 py-4 space-y-3 flex-1">
+            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Overview</p>
+            {[
+              {label:'Total Users',value:stats.totalUsers,icon:<Users className="h-4 w-4"/>},
+              {label:'Emergencies',value:stats.totalEmergencies,icon:<AlertCircle className="h-4 w-4"/>},
+              {label:'Elderly',value:stats.elderly,icon:<Heart className="h-4 w-4"/>},
+              {label:'Doctors',value:stats.doctors,icon:<Stethoscope className="h-4 w-4"/>},
+              {label:'Caregivers',value:stats.caregivers,icon:<Users className="h-4 w-4"/>},
+            ].map(s=>(
+              <div key={s.label} className="flex items-center justify-between">
+                <div className="flex items-center gap-2 text-gray-400">{s.icon}<span className="text-sm">{s.label}</span></div>
+                <span className="text-sm font-semibold text-white">{s.value}</span>
+              </div>
+            ))}
+          </div>
+
+          {/* Bottom actions */}
+          <div className="px-6 py-4 border-t border-gray-700 space-y-2">
+            <button className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-gray-400 hover:bg-gray-800 hover:text-white text-sm transition-colors" onClick={loadData}>
+              <RefreshCw className="h-4 w-4"/>Refresh Data
+            </button>
+            <button className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-gray-400 hover:bg-red-900 hover:text-red-300 text-sm transition-colors" onClick={handleLogout}>
+              <LogOut className="h-4 w-4"/>Sign Out
+            </button>
+          </div>
+        </aside>
+
+        {/* Main content */}
+        <div className="flex-1 flex flex-col min-w-0">
+          {/* Top bar (mobile) */}
+          <header className="bg-white border-b border-gray-200 px-4 sm:px-6 py-3 flex items-center justify-between lg:hidden sticky top-0 z-30">
+            <div className="flex items-center gap-2">
+              <div className="h-8 w-8 rounded-lg bg-teal-600 flex items-center justify-center"><Shield className="h-4 w-4 text-white"/></div>
+              <span className="font-bold text-gray-900">CareDose+ Admin</span>
+            </div>
+            <div className="flex gap-2">
+              <Button variant="ghost" size="icon" className="h-9 w-9 text-gray-600" onClick={loadData}><RefreshCw className="h-4 w-4"/></Button>
+              <Button variant="ghost" size="icon" className="h-9 w-9 text-gray-600" onClick={handleLogout}><LogOut className="h-4 w-4"/></Button>
+            </div>
+          </header>
+
+          <main className="flex-1 p-4 sm:p-6 space-y-6">
+            {/* Page header */}
+            <div className="hidden lg:flex items-center justify-between">
+              <div>
+                <h1 className="text-2xl font-bold text-gray-900">Admin Dashboard</h1>
+                <p className="text-sm text-gray-500 mt-1">Manage users, monitor system, review activity</p>
+              </div>
+              <Button className="bg-teal-600 hover:bg-teal-700 text-white h-10 px-5" onClick={()=>setShowAddModal(true)}>
+                <UserPlus className="h-4 w-4 mr-2"/>Add User
+              </Button>
+            </div>
+
+            {/* Stats cards */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+              {[
+                {label:'Total Users',value:stats.totalUsers,icon:<Users className="h-6 w-6 text-blue-600"/>,bg:'bg-blue-50',border:'border-blue-100'},
+                {label:'Emergencies',value:stats.totalEmergencies,icon:<AlertCircle className="h-6 w-6 text-red-600"/>,bg:'bg-red-50',border:'border-red-100'},
+                {label:'Resolved',value:stats.resolvedEmergencies,icon:<CheckCircle className="h-6 w-6 text-emerald-600"/>,bg:'bg-emerald-50',border:'border-emerald-100'},
+                {label:'Active Today',value:stats.activeToday,icon:<Activity className="h-6 w-6 text-teal-600"/>,bg:'bg-teal-50',border:'border-teal-100'},
+              ].map(s=>(
+                <Card key={s.label} className={`${s.bg} border ${s.border} shadow-none`}>
+                  <CardContent className="p-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-xs text-gray-500 font-medium">{s.label}</p>
+                        <p className="text-3xl font-bold text-gray-900 mt-1">{s.value}</p>
                       </div>
+                      <div className="p-2 rounded-xl bg-white shadow-sm">{s.icon}</div>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+
+            {/* Role breakdown */}
+            <Card className="bg-white border border-gray-200 shadow-none">
+              <CardHeader className="pb-3"><CardTitle className="text-base font-semibold text-gray-900">User Distribution</CardTitle></CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  {[
+                    {role:'elderly',label:'Elderly',value:stats.elderly},
+                    {role:'caregiver',label:'Caregivers',value:stats.caregivers},
+                    {role:'doctor',label:'Doctors',value:stats.doctors},
+                    {role:'admin',label:'Admins',value:stats.admins},
+                  ].map(s=>(
+                    <div key={s.role} className={`p-4 rounded-xl border ${rc(s.role).bg} ${rc(s.role).border}`}>
+                      <div className={`h-2 w-2 rounded-full ${rc(s.role).dot} mb-2`}></div>
+                      <p className={`text-2xl font-bold ${rc(s.role).color}`}>{s.value}</p>
+                      <p className="text-xs text-gray-500 mt-1">{s.label}</p>
                     </div>
                   ))}
                 </div>
+                {stats.totalUsers>0&&(
+                  <div className="mt-4">
+                    <div className="flex h-2 rounded-full overflow-hidden gap-0.5">
+                      {[{v:stats.elderly,c:'bg-amber-400'},{v:stats.caregivers,c:'bg-teal-400'},{v:stats.doctors,c:'bg-blue-400'},{v:stats.admins,c:'bg-violet-400'}].map((s,i)=>(
+                        s.v>0&&<div key={i} className={`${s.c} rounded-full`} style={{width:`${(s.v/stats.totalUsers)*100}%`}}/>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </CardContent>
             </Card>
-          </TabsContent>
 
-          {/* Activity Logs Tab */}
-          <TabsContent value="logs">
-            <Card className="bg-slate-900/50 backdrop-blur-sm border border-slate-800/50 shadow-xl">
-              <CardHeader className="pb-4">
-                <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
-                  <CardTitle className="text-slate-100 text-xl font-semibold">User Activity Logs</CardTitle>
-                  <div className="relative w-full sm:w-64">
-                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-slate-500" />
-                    <Input
-                      placeholder="Search users..."
-                      value={logSearchTerm}
-                      onChange={(e) => setLogSearchTerm(e.target.value)}
-                      className="pl-9 bg-slate-800/50 border-slate-700 text-slate-200 placeholder:text-slate-500 w-full h-10 rounded-lg"
-                    />
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent className="pt-0">
-                <div className="space-y-4">
-                  {filteredLogUsers.map((user) => {
-                    const logCount = getUserLogs(user.uid).length;
-                    return (
-                      <div key={user.uid} className="p-5 bg-slate-800/30 rounded-xl border border-slate-700/50 hover:bg-slate-800/40 transition-all backdrop-blur-sm">
-                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                          <div className="flex items-center gap-4">
-                            <Avatar className="h-12 w-12 border-2 border-indigo-500/30">
-                              <AvatarFallback className="bg-gradient-to-br from-indigo-900/80 to-purple-900/80 text-indigo-100">
-                                {user.name?.charAt(0)}
-                              </AvatarFallback>
-                            </Avatar>
-                            <div>
-                              <p className="text-slate-100 font-semibold text-lg">{user.name}</p>
-                              <p className="text-sm text-slate-400">{user.email}</p>
+            {/* Main tabs */}
+            <Tabs defaultValue="users">
+              <TabsList className="w-full sm:w-auto">
+                <TabsTrigger value="users">👥 Users</TabsTrigger>
+                <TabsTrigger value="logs">📋 Activity</TabsTrigger>
+                <TabsTrigger value="emergencies">🚨 Emergencies</TabsTrigger>
+                <TabsTrigger value="system">⚙️ System</TabsTrigger>
+                <TabsTrigger value="profile">👤 Profile</TabsTrigger>
+              </TabsList>
+
+              {/* ── USERS ── */}
+              <TabsContent value="users" className="mt-4">
+                <Card className="bg-white border border-gray-200 shadow-none">
+                  <CardHeader className="pb-4">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <CardTitle className="text-base font-semibold text-gray-900">All Users ({filteredUsers.length})</CardTitle>
+                      <div className="flex gap-3">
+                        <div className="relative">
+                          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400"/>
+                          <Input placeholder="Search users…" value={userSearch} onChange={e=>setUserSearch(e.target.value)} className="pl-9 w-64 border-gray-300 bg-white h-9"/>
+                        </div>
+                        <Button className="bg-teal-600 hover:bg-teal-700 text-white h-9 px-4 text-sm" onClick={()=>setShowAddModal(true)}>
+                          <UserPlus className="h-4 w-4 mr-1.5"/>Add User
+                        </Button>
+                      </div>
+                    </div>
+                  </CardHeader>
+                  <CardContent className="p-0">
+                    <div className="divide-y divide-gray-100">
+                      {filteredUsers.map(u=>(
+                        <div key={u.uid} className="flex items-center justify-between px-6 py-4 hover:bg-gray-50 transition-colors">
+                          <div className="flex items-center gap-4 min-w-0">
+                            <div className={`h-10 w-10 rounded-full ${rc(u.role).bg} ${rc(u.role).border} border-2 flex items-center justify-center font-bold ${rc(u.role).color} text-sm shrink-0`}>{u.name?.charAt(0)}</div>
+                            <div className="min-w-0">
+                              <p className="font-medium text-gray-900 truncate">{u.name}</p>
+                              <p className="text-xs text-gray-500 truncate">{u.email}</p>
                               <div className="flex items-center gap-2 mt-1">
-                                <Badge className={getRoleBadgeColor(user.role)}>
-                                  {user.role}
-                                </Badge>
-                                <Badge className="bg-blue-900/60 text-blue-100 border border-blue-700/30">
-                                  {logCount} logs
-                                </Badge>
+                                <span className={`text-xs font-medium px-2 py-0.5 rounded-full border ${rc(u.role).bg} ${rc(u.role).color} ${rc(u.role).border}`}>{u.role}</span>
+                                {u.isActive===false?<span className="text-xs text-gray-400 px-2 py-0.5 rounded-full bg-gray-100">Inactive</span>:<span className="text-xs text-emerald-700 px-2 py-0.5 rounded-full bg-emerald-50">Active</span>}
                               </div>
                             </div>
                           </div>
-                          <Button 
-                            className="bg-blue-900/60 hover:bg-blue-800/60 text-blue-100 border border-blue-700/30 w-full sm:w-auto h-10 px-5 rounded-lg transition-colors backdrop-blur-sm"
-                            onClick={() => handleViewLogs(user)}
-                          >
-                            <Eye className="h-4 w-4 mr-2" />
-                            View Activity Logs
-                          </Button>
+                          <div className="flex items-center gap-2 shrink-0">
+                            <Button size="sm" variant="outline" className="border-gray-300 text-gray-700 hover:bg-gray-100 h-8 px-3 text-xs" onClick={()=>{setSelectedUser(u);setShowUserModal(true);}}>
+                              <Edit className="h-3.5 w-3.5 mr-1"/>Edit
+                            </Button>
+                            <Button size="sm" className="bg-blue-600 hover:bg-blue-700 text-white h-8 px-3 text-xs" onClick={()=>{setSelectedUser(u);setSelectedUserLogs(logsByUser[u.uid]||[]);setShowLogsModal(true);}}>
+                              <Eye className="h-3.5 w-3.5 mr-1"/>Logs
+                            </Button>
+                            <Button size="sm" className="bg-red-600 hover:bg-red-700 text-white h-8 px-3 text-xs" onClick={()=>handleDeleteUser(u.uid)}>
+                              <Trash2 className="h-3.5 w-3.5"/>
+                            </Button>
+                          </div>
                         </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
+                      ))}
+                      {filteredUsers.length===0&&<div className="py-12 text-center text-gray-500">No users found</div>}
+                    </div>
+                  </CardContent>
+                </Card>
+              </TabsContent>
 
-          {/* Emergencies Tab */}
-          <TabsContent value="emergencies">
-            <Card className="bg-slate-900/50 backdrop-blur-sm border border-slate-800/50 shadow-xl">
-              <CardHeader>
-                <CardTitle className="text-slate-100 text-xl font-semibold">Emergency Alerts</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-4">
-                  {emergencies.map((emergency) => {
-                    const user = allUsers.find(u => u.uid === emergency.userId);
-                    return (
-                      <div key={emergency.id} className="p-5 bg-slate-800/30 rounded-xl border border-slate-700/50 backdrop-blur-sm">
-                        <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
-                          <div>
-                            <p className="text-slate-100 font-semibold text-lg">
-                              {user?.name || 'Unknown User'}
-                            </p>
-                            <p className="text-sm text-slate-400 mt-1">{emergency.message || 'Emergency alert'}</p>
-                            <div className="flex flex-wrap items-center gap-3 mt-3">
-                              <Badge className={emergency.status === 'active' ? 'bg-rose-900/60 text-rose-100 border border-rose-700/30' : 'bg-emerald-900/60 text-emerald-100 border border-emerald-700/30'}>
-                                {emergency.status}
-                              </Badge>
-                              <span className="text-xs text-slate-500">
-                                {new Date(emergency.createdAt).toLocaleString()}
-                              </span>
+              {/* ── ACTIVITY LOGS ── */}
+              <TabsContent value="logs" className="mt-4">
+                <Card className="bg-white border border-gray-200 shadow-none">
+                  <CardHeader className="pb-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <CardTitle className="text-base font-semibold text-gray-900">Activity Logs</CardTitle>
+                      <div className="relative">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400"/>
+                        <Input placeholder="Filter by user…" value={logSearch} onChange={e=>setLogSearch(e.target.value)} className="pl-9 w-56 border-gray-300 bg-white h-9"/>
+                      </div>
+                    </div>
+                  </CardHeader>
+                  <CardContent className="p-0">
+                    <div className="divide-y divide-gray-100">
+                      {filteredLogUsers.map(u=>{
+                        const lc = (logsByUser[u.uid]||[]).length;
+                        return (
+                          <div key={u.uid} className="flex items-center justify-between px-6 py-4 hover:bg-gray-50">
+                            <div className="flex items-center gap-4 min-w-0">
+                              <div className={`h-10 w-10 rounded-full ${rc(u.role).bg} border-2 ${rc(u.role).border} flex items-center justify-center font-bold ${rc(u.role).color} text-sm shrink-0`}>{u.name?.charAt(0)}</div>
+                              <div className="min-w-0">
+                                <p className="font-medium text-gray-900 truncate">{u.name}</p>
+                                <p className="text-xs text-gray-500 truncate">{u.email}</p>
+                                <div className="flex items-center gap-2 mt-1">
+                                  <span className={`text-xs px-2 py-0.5 rounded-full border ${rc(u.role).bg} ${rc(u.role).color} ${rc(u.role).border}`}>{u.role}</span>
+                                  <span className="text-xs text-blue-700 bg-blue-50 px-2 py-0.5 rounded-full">{lc} log{lc!==1?'s':''}</span>
+                                </div>
+                              </div>
+                            </div>
+                            <Button className="bg-blue-600 hover:bg-blue-700 text-white h-9 px-4 text-sm" onClick={()=>{setSelectedUser(u);setSelectedUserLogs(logsByUser[u.uid]||[]);setShowLogsModal(true);}}>
+                              <Eye className="h-4 w-4 mr-2"/>View Logs
+                            </Button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </CardContent>
+                </Card>
+              </TabsContent>
+
+              {/* ── EMERGENCIES ── */}
+              <TabsContent value="emergencies" className="mt-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <h2 className="text-base font-semibold text-gray-900">Emergency Alerts ({emergencies.length})</h2>
+                  <Button className="bg-red-600 hover:bg-red-700 text-white h-9 px-4 text-sm" onClick={()=>window.location.href='tel:911'}><Phone className="h-4 w-4 mr-2"/>Call 911</Button>
+                </div>
+                {emergencies.length===0?(
+                  <Card className="bg-white border border-gray-200 shadow-none"><CardContent className="py-12 text-center text-gray-500">No emergencies recorded</CardContent></Card>
+                ):emergencies.map(em=>{
+                  const u=allUsers.find(u=>u.uid===em.userId);
+                  return (
+                    <Card key={em.id} className={`border shadow-none ${em.status==='active'?'bg-red-50 border-red-200':'bg-gray-50 border-gray-200'}`}>
+                      <CardContent className="p-5">
+                        <div className="flex flex-wrap items-start justify-between gap-4">
+                          <div className="flex items-start gap-3">
+                            <AlertCircle className={`h-5 w-5 mt-0.5 shrink-0 ${em.status==='active'?'text-red-500 animate-pulse':'text-gray-400'}`}/>
+                            <div>
+                              <p className="font-semibold text-gray-900">{u?.name||em.userName||'Unknown'}</p>
+                              <p className={`text-sm font-medium ${em.status==='active'?'text-red-700':'text-gray-500'}`}>{em.type?.toUpperCase()||'EMERGENCY'}</p>
+                              <div className="flex items-center gap-2 mt-1">
+                                <Badge className={em.status==='active'?'bg-red-600 text-white text-xs':'bg-gray-400 text-white text-xs'}>{em.status}</Badge>
+                                <span className="text-xs text-gray-400">{em.createdAt||em.timestamp?.toDate?.()?.toLocaleString()}</span>
+                              </div>
                             </div>
                           </div>
-                          {emergency.status === 'active' && (
-                            <Button 
-                              size="sm" 
-                              className="bg-emerald-900/60 hover:bg-emerald-800/60 text-emerald-100 border border-emerald-700/30 w-full sm:w-auto h-9 px-4 rounded-lg transition-colors backdrop-blur-sm"
-                              onClick={() => handleResolveEmergency(emergency.id)}
-                            >
-                              <CheckCircle className="h-4 w-4 mr-2" />
-                              Resolve
-                            </Button>
-                          )}
+                          {em.status==='active'&&<Button className="bg-emerald-600 hover:bg-emerald-700 text-white h-9 px-4 text-sm" onClick={()=>handleResolveEmergency(em.id)}><CheckCircle className="h-4 w-4 mr-2"/>Resolve</Button>}
                         </div>
-                      </div>
-                    );
-                  })}
+                      </CardContent>
+                    </Card>
+                  );
+                })}
+              </TabsContent>
+
+              {/* ── SYSTEM ── */}
+              <TabsContent value="system" className="mt-4 space-y-4">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                  {[
+                    {name:'Database',icon:<Database className="h-8 w-8"/>,status:systemHealth.database,color:'text-blue-600',bg:'bg-blue-50'},
+                    {name:'Auth',icon:<Lock className="h-8 w-8"/>,status:systemHealth.auth,color:'text-violet-600',bg:'bg-violet-50'},
+                    {name:'API',icon:<Globe className="h-8 w-8"/>,status:systemHealth.api,color:'text-teal-600',bg:'bg-teal-50'},
+                    {name:'Storage',icon:<Server className="h-8 w-8"/>,status:systemHealth.storage,color:'text-amber-600',bg:'bg-amber-50'},
+                  ].map(s=>(
+                    <Card key={s.name} className="bg-white border border-gray-200 shadow-none">
+                      <CardContent className="p-5 text-center">
+                        <div className={`h-14 w-14 ${s.bg} rounded-xl flex items-center justify-center mx-auto mb-3 ${s.color}`}>{s.icon}</div>
+                        <p className="font-semibold text-gray-900">{s.name}</p>
+                        <Badge className={`mt-2 text-xs ${s.status==='healthy'?'bg-emerald-100 text-emerald-700':'bg-red-100 text-red-700'}`}>{s.status}</Badge>
+                      </CardContent>
+                    </Card>
+                  ))}
                 </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
+                <Card className="bg-white border border-gray-200 shadow-none">
+                  <CardContent className="p-5 flex items-center justify-between">
+                    <p className="text-sm text-gray-500">Last health check: {new Date(systemHealth.lastChecked).toLocaleString()}</p>
+                    <Button variant="outline" className="border-gray-300 text-gray-700 h-9 px-4 text-sm" onClick={checkHealth}><RefreshCw className="h-4 w-4 mr-2"/>Check Now</Button>
+                  </CardContent>
+                </Card>
+              </TabsContent>
 
-          {/* Analytics Tab */}
-          <TabsContent value="analytics">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <Card className="bg-slate-900/50 backdrop-blur-sm border border-slate-800/50 shadow-xl">
-                <CardHeader>
-                  <CardTitle className="text-slate-100 text-xl font-semibold">User Distribution</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-5">
-                  <div>
-                    <div className="flex justify-between text-sm text-slate-300 mb-2">
-                      <span className="font-medium">Elderly</span>
-                      <span className="font-semibold">{stats.elderly}</span>
-                    </div>
-                    <Progress value={stats.totalUsers > 0 ? (stats.elderly / stats.totalUsers) * 100 : 0} className="h-2 bg-slate-700" />
-                  </div>
-                  <div>
-                    <div className="flex justify-between text-sm text-slate-300 mb-2">
-                      <span className="font-medium">Caregivers</span>
-                      <span className="font-semibold">{stats.caregivers}</span>
-                    </div>
-                    <Progress value={stats.totalUsers > 0 ? (stats.caregivers / stats.totalUsers) * 100 : 0} className="h-2 bg-slate-700" />
-                  </div>
-                  <div>
-                    <div className="flex justify-between text-sm text-slate-300 mb-2">
-                      <span className="font-medium">Doctors</span>
-                      <span className="font-semibold">{stats.doctors}</span>
-                    </div>
-                    <Progress value={stats.totalUsers > 0 ? (stats.doctors / stats.totalUsers) * 100 : 0} className="h-2 bg-slate-700" />
-                  </div>
-                  <div>
-                    <div className="flex justify-between text-sm text-slate-300 mb-2">
-                      <span className="font-medium">Admins</span>
-                      <span className="font-semibold">{stats.admins}</span>
-                    </div>
-                    <Progress value={stats.totalUsers > 0 ? (stats.admins / stats.totalUsers) * 100 : 0} className="h-2 bg-slate-700" />
-                  </div>
-                </CardContent>
-              </Card>
+              {/* ── PROFILE ── */}
+              <TabsContent value="profile" className="mt-4">
+                <ProfileTab user={user} profile={profile} onProfileUpdated={u=>setProfile(u)} roleColor="violet"/>
+              </TabsContent>
+            </Tabs>
+          </main>
+        </div>
+      </div>
 
-              <Card className="bg-slate-900/50 backdrop-blur-sm border border-slate-800/50 shadow-xl">
-                <CardHeader>
-                  <CardTitle className="text-slate-100 text-xl font-semibold">Emergency Statistics</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-5">
-                  <div className="flex justify-between items-center p-4 bg-slate-800/30 rounded-xl border border-slate-700/50">
-                    <span className="text-slate-300 font-medium">Total Emergencies</span>
-                    <span className="text-2xl font-bold text-slate-100">{stats.totalEmergencies}</span>
-                  </div>
-                  <div className="flex justify-between items-center p-4 bg-slate-800/30 rounded-xl border border-slate-700/50">
-                    <span className="text-slate-300 font-medium">Resolved</span>
-                    <span className="text-2xl font-bold text-slate-100">{stats.resolvedEmergencies}</span>
-                  </div>
-                  <div className="flex justify-between items-center p-4 bg-slate-800/30 rounded-xl border border-slate-700/50">
-                    <span className="text-slate-300 font-medium">Resolution Rate</span>
-                    <span className="text-2xl font-bold text-slate-100">
-                      {stats.totalEmergencies > 0 
-                        ? Math.round((stats.resolvedEmergencies / stats.totalEmergencies) * 100) 
-                        : 0}%
-                    </span>
-                  </div>
-                  <Progress 
-                    value={stats.totalEmergencies > 0 ? (stats.resolvedEmergencies / stats.totalEmergencies) * 100 : 0} 
-                    className="h-2 bg-slate-700 mt-2" 
-                  />
-                </CardContent>
-              </Card>
-            </div>
-          </TabsContent>
-
-          {/* System Health Tab */}
-          <TabsContent value="system">
-            <Card className="bg-slate-900/50 backdrop-blur-sm border border-slate-800/50 shadow-xl">
-              <CardHeader>
-                <CardTitle className="text-slate-100 text-xl font-semibold">System Health</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
-                  <div className="p-6 bg-slate-800/30 rounded-xl text-center border border-slate-700/50 backdrop-blur-sm">
-                    <Database className="h-8 w-8 text-blue-400/80 mx-auto mb-3" />
-                    <p className="text-slate-200 font-medium">Database</p>
-                    <Badge className={systemHealth.database === 'healthy' ? 'bg-emerald-900/60 text-emerald-100 border border-emerald-700/30 mt-3' : 'bg-rose-900/60 text-rose-100 border border-rose-700/30 mt-3'}>
-                      {systemHealth.database}
-                    </Badge>
-                  </div>
-                  
-                  <div className="p-6 bg-slate-800/30 rounded-xl text-center border border-slate-700/50 backdrop-blur-sm">
-                    <Lock className="h-8 w-8 text-purple-400/80 mx-auto mb-3" />
-                    <p className="text-slate-200 font-medium">Authentication</p>
-                    <Badge className={systemHealth.auth === 'healthy' ? 'bg-emerald-900/60 text-emerald-100 border border-emerald-700/30 mt-3' : 'bg-rose-900/60 text-rose-100 border border-rose-700/30 mt-3'}>
-                      {systemHealth.auth}
-                    </Badge>
-                  </div>
-                  
-                  <div className="p-6 bg-slate-800/30 rounded-xl text-center border border-slate-700/50 backdrop-blur-sm">
-                    <Globe className="h-8 w-8 text-emerald-400/80 mx-auto mb-3" />
-                    <p className="text-slate-200 font-medium">API</p>
-                    <Badge className={systemHealth.api === 'healthy' ? 'bg-emerald-900/60 text-emerald-100 border border-emerald-700/30 mt-3' : 'bg-rose-900/60 text-rose-100 border border-rose-700/30 mt-3'}>
-                      {systemHealth.api}
-                    </Badge>
-                  </div>
-                  
-                  <div className="p-6 bg-slate-800/30 rounded-xl text-center border border-slate-700/50 backdrop-blur-sm">
-                    <Server className="h-8 w-8 text-amber-400/80 mx-auto mb-3" />
-                    <p className="text-slate-200 font-medium">Storage</p>
-                    <Badge className={systemHealth.storage === 'healthy' ? 'bg-emerald-900/60 text-emerald-100 border border-emerald-700/30 mt-3' : 'bg-rose-900/60 text-rose-100 border border-rose-700/30 mt-3'}>
-                      {systemHealth.storage}
-                    </Badge>
-                  </div>
-                </div>
-                
-                <div className="mt-6 p-4 bg-slate-800/30 rounded-xl text-center border border-slate-700/50 backdrop-blur-sm">
-                  <Clock className="h-4 w-4 text-slate-500 inline mr-2" />
-                  <p className="text-sm text-slate-400 inline">
-                    Last checked: {new Date(systemHealth.lastChecked).toLocaleString()}
-                  </p>
-                </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          {/* Profile Tab */}
-          <TabsContent value="profile" className="mt-4">
-            <div className="bg-slate-800/50 rounded-xl p-1">
-              <ProfileTab
-                user={user}
-                profile={profile}
-                onProfileUpdated={(updated) => setProfile(updated)}
-                roleColor="indigo"
-              />
-            </div>
-          </TabsContent>
-        </Tabs>
-      </main>
-
-      {/* Emergency Popup */}
-      {user && <EmergencyPopup userId={user.uid} />}
+      {user&&<EmergencyPopup userId={user.uid}/>}
 
       {/* Add User Modal */}
-      <Dialog open={showAddUserModal} onOpenChange={setShowAddUserModal}>
-        <DialogContent className="bg-slate-900 text-slate-100 border-slate-800 max-w-md rounded-xl backdrop-blur-sm" aria-describedby="add-user-description">
-          <DialogHeader>
-            <DialogTitle className="text-slate-100 text-xl font-semibold">Add New User</DialogTitle>
-          </DialogHeader>
-          <div id="add-user-description" className="sr-only">
-            Form to create a new user account
-          </div>
-          
-          <div className="space-y-5 mt-2">
-            <div className="space-y-2">
-              <Label className="text-slate-200 text-sm font-medium">Full Name *</Label>
-              <Input
-                placeholder="Enter full name"
-                value={newUser.name}
-                onChange={(e) => setNewUser({ ...newUser, name: e.target.value })}
-                className="bg-slate-800 border-slate-700 text-slate-200 h-11 rounded-lg"
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label className="text-slate-200 text-sm font-medium">Email *</Label>
-              <Input
-                type="email"
-                placeholder="Enter email"
-                value={newUser.email}
-                onChange={(e) => setNewUser({ ...newUser, email: e.target.value })}
-                className="bg-slate-800 border-slate-700 text-slate-200 h-11 rounded-lg"
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label className="text-slate-200 text-sm font-medium">Password *</Label>
-              <Input
-                type="password"
-                placeholder="Enter password"
-                value={newUser.password}
-                onChange={(e) => setNewUser({ ...newUser, password: e.target.value })}
-                className="bg-slate-800 border-slate-700 text-slate-200 h-11 rounded-lg"
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label className="text-slate-200 text-sm font-medium">Phone Number</Label>
-              <Input
-                placeholder="Enter phone number"
-                value={newUser.phone}
-                onChange={(e) => setNewUser({ ...newUser, phone: e.target.value })}
-                className="bg-slate-800 border-slate-700 text-slate-200 h-11 rounded-lg"
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label className="text-slate-200 text-sm font-medium">Role</Label>
-              <select
-                value={newUser.role}
-                onChange={(e) => setNewUser({ ...newUser, role: e.target.value })}
-                className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
-              >
-                <option value="elderly">Elderly</option>
+      <Dialog open={showAddModal} onOpenChange={setShowAddModal}>
+        <DialogContent className="bg-white max-w-md" aria-describedby="add-desc">
+          <DialogHeader><DialogTitle className="text-gray-900">Add New User</DialogTitle></DialogHeader>
+          <p id="add-desc" className="sr-only">Create a new user account</p>
+          <div className="space-y-4 mt-2">
+            {[
+              {key:'name',label:'Full Name *',type:'text',ph:'Enter full name'},
+              {key:'email',label:'Email *',type:'email',ph:'Enter email'},
+              {key:'password',label:'Password *',type:'password',ph:'Min. 6 characters'},
+              {key:'phone',label:'Phone',type:'tel',ph:'+1 (555) 000-0000'},
+            ].map(f=>(
+              <div key={f.key} className="space-y-1.5">
+                <Label className="text-sm font-medium text-gray-700">{f.label}</Label>
+                <Input type={f.type} placeholder={f.ph} value={(newUser as any)[f.key]} onChange={e=>setNewUser(p=>({...p,[f.key]:e.target.value}))} className="border-gray-300 bg-white h-10"/>
+              </div>
+            ))}
+            <div className="space-y-1.5">
+              <Label className="text-sm font-medium text-gray-700">Role</Label>
+              <select value={newUser.role} onChange={e=>setNewUser(p=>({...p,role:e.target.value}))} className="w-full border border-gray-300 rounded-lg px-3 py-2 bg-white text-gray-900 text-sm h-10 focus:outline-none focus:ring-2 focus:ring-teal-500">
+                <option value="elderly">Elderly Patient</option>
                 <option value="caregiver">Caregiver</option>
                 <option value="doctor">Doctor</option>
                 <option value="admin">Admin</option>
               </select>
             </div>
-
-            <div className="flex gap-3 pt-4">
-              <Button 
-                variant="outline"
-                className="border-slate-700 text-slate-300 hover:bg-slate-800 hover:text-white flex-1 h-11 rounded-lg transition-colors"
-                onClick={() => setShowAddUserModal(false)}
-              >
-                Cancel
-              </Button>
-              <Button 
-                className="bg-emerald-900/60 hover:bg-emerald-800/60 text-emerald-100 border border-emerald-700/30 flex-1 h-11 rounded-lg transition-colors backdrop-blur-sm"
-                onClick={handleAddUser}
-              >
-                <UserPlus className="h-4 w-4 mr-2" />
-                Create User
-              </Button>
+            <div className="flex gap-3 pt-2">
+              <Button variant="outline" className="flex-1 border-gray-300 text-gray-700 hover:bg-gray-100 h-10" onClick={()=>setShowAddModal(false)}>Cancel</Button>
+              <Button className="flex-1 bg-teal-600 hover:bg-teal-700 text-white h-10" onClick={handleAddUser}><UserPlus className="h-4 w-4 mr-2"/>Create User</Button>
             </div>
           </div>
         </DialogContent>
       </Dialog>
 
-      {/* Edit User Modal - WITH ANIMATED TOGGLE */}
+      {/* Edit User Modal */}
       <Dialog open={showUserModal} onOpenChange={setShowUserModal}>
-        <DialogContent className="bg-slate-900 text-slate-100 border-slate-800 max-w-md rounded-xl backdrop-blur-sm" aria-describedby="edit-user-description">
-          <DialogHeader>
-            <DialogTitle className="text-slate-100 text-xl font-semibold">Edit User</DialogTitle>
-          </DialogHeader>
-          <div id="edit-user-description" className="sr-only">
-            Edit user role and account status
-          </div>
-          {selectedUser && (
+        <DialogContent className="bg-white max-w-md" aria-describedby="edit-desc">
+          <DialogHeader><DialogTitle className="text-gray-900">Edit User</DialogTitle></DialogHeader>
+          <p id="edit-desc" className="sr-only">Edit user account</p>
+          {selectedUser&&(
             <div className="space-y-5">
-              <div className="flex items-center gap-4">
-                <Avatar className="h-16 w-16 border-2 border-indigo-500/30">
-                  <AvatarFallback className="bg-gradient-to-br from-indigo-900/80 to-purple-900/80 text-indigo-100 text-xl">
-                    {selectedUser.name?.charAt(0)}
-                  </AvatarFallback>
-                </Avatar>
-                <div>
-                  <h3 className="text-xl font-bold text-slate-100">{selectedUser.name}</h3>
-                  <p className="text-slate-400">{selectedUser.email}</p>
-                </div>
+              <div className={`flex items-center gap-4 p-4 rounded-xl border ${rc(selectedUser.role).bg} ${rc(selectedUser.role).border}`}>
+                <div className={`h-14 w-14 rounded-full border-2 ${rc(selectedUser.role).border} flex items-center justify-center font-bold text-xl ${rc(selectedUser.role).color}`}>{selectedUser.name?.charAt(0)}</div>
+                <div><p className="font-bold text-gray-900 text-lg">{selectedUser.name}</p><p className="text-sm text-gray-500">{selectedUser.email}</p></div>
               </div>
-
-              <div className="space-y-2">
-                <Label className="text-slate-200 text-sm font-medium">Role</Label>
-                <select
-                  value={selectedUser.role}
-                  onChange={(e) => handleUpdateUserRole(selectedUser.uid, e.target.value)}
-                  className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
-                >
-                  <option value="elderly">Elderly</option>
+              <div className="space-y-1.5">
+                <Label className="text-sm font-medium text-gray-700">Role</Label>
+                <select value={selectedUser.role} onChange={e=>handleUpdateRole(selectedUser.uid,e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 bg-white text-gray-900 text-sm h-10">
+                  <option value="elderly">Elderly Patient</option>
                   <option value="caregiver">Caregiver</option>
                   <option value="doctor">Doctor</option>
                   <option value="admin">Admin</option>
                 </select>
               </div>
-
-              <div className="space-y-2">
-                <Label className="text-slate-200 text-sm font-medium">Account Status</Label>
-                <div className="flex items-center justify-between p-3 bg-slate-800/50 rounded-lg border border-slate-700/50">
-                  <span className="text-sm text-slate-300">
-                    {selectedUser.isActive === false ? 'Account is Inactive' : 'Account is Active'}
-                  </span>
-                  <Button
-                    variant={selectedUser.isActive === false ? 'outline' : 'default'}
-                    className={selectedUser.isActive === false 
-                      ? 'border-slate-600 text-slate-300 hover:bg-slate-700 hover:text-white h-10 px-4 rounded-lg transition-all duration-300 ease-in-out transform hover:scale-105' 
-                      : 'bg-emerald-900/60 hover:bg-emerald-800/60 text-emerald-100 border border-emerald-700/30 h-10 px-4 rounded-lg transition-all duration-300 ease-in-out transform hover:scale-105'
-                    }
-                    onClick={() => handleToggleUserStatus(selectedUser.uid, selectedUser.isActive !== false)}
-                  >
-                    {selectedUser.isActive === false ? (
-                      <>
-                        <ToggleLeft className="h-5 w-5 mr-2 transition-transform duration-300" />
-                        Activate Account
-                      </>
-                    ) : (
-                      <>
-                        <ToggleRight className="h-5 w-5 mr-2 transition-transform duration-300" />
-                        Deactivate Account
-                      </>
-                    )}
-                  </Button>
+              <div className="flex items-center justify-between p-4 bg-gray-50 rounded-xl border border-gray-200">
+                <div>
+                  <p className="font-medium text-gray-900 text-sm">Account Status</p>
+                  <p className="text-xs text-gray-500 mt-0.5">{selectedUser.isActive===false?'Account is inactive':'Account is active'}</p>
                 </div>
+                <Button
+                  className={selectedUser.isActive===false?'bg-emerald-600 hover:bg-emerald-700 text-white h-9 px-4 text-sm':'bg-gray-200 hover:bg-gray-300 text-gray-700 h-9 px-4 text-sm'}
+                  onClick={()=>handleToggleStatus(selectedUser.uid, selectedUser.isActive!==false)}>
+                  {selectedUser.isActive===false?<><ToggleLeft className="h-4 w-4 mr-2"/>Activate</>:<><ToggleRight className="h-4 w-4 mr-2"/>Deactivate</>}
+                </Button>
               </div>
-
-              <div className="flex gap-3 pt-4">
-                <Button 
-                  variant="destructive"
-                  className="bg-rose-900/60 hover:bg-rose-800/60 text-rose-100 border border-rose-700/30 flex-1 h-11 rounded-lg transition-colors backdrop-blur-sm"
-                  onClick={() => handleDeleteUser(selectedUser.uid)}
-                >
-                  <Trash2 className="h-4 w-4 mr-2" />
-                  Delete User
+              <div className="flex gap-3">
+                <Button className="flex-1 bg-red-600 hover:bg-red-700 text-white h-10" onClick={()=>{handleDeleteUser(selectedUser.uid);setShowUserModal(false);}}>
+                  <Trash2 className="h-4 w-4 mr-2"/>Delete User
                 </Button>
-                <Button 
-                  variant="outline"
-                  className="border-slate-700 text-slate-300 hover:bg-slate-800 hover:text-white flex-1 h-11 rounded-lg transition-colors"
-                  onClick={() => setShowUserModal(false)}
-                >
-                  Cancel
-                </Button>
+                <Button variant="outline" className="flex-1 border-gray-300 text-gray-700 h-10" onClick={()=>setShowUserModal(false)}>Close</Button>
               </div>
             </div>
           )}
         </DialogContent>
       </Dialog>
 
-      {/* User Logs Modal */}
+      {/* Logs Modal */}
       <Dialog open={showLogsModal} onOpenChange={setShowLogsModal}>
-        <DialogContent className="bg-slate-900 text-slate-100 border-slate-800 max-w-3xl max-h-[80vh] overflow-y-auto rounded-xl backdrop-blur-sm" aria-describedby="logs-description">
-          <DialogHeader className="sticky top-0 bg-slate-900 z-10 pb-4 border-b border-slate-800">
-            <DialogTitle className="text-slate-100 flex items-center gap-2 text-xl font-semibold">
-              <Activity className="h-5 w-5 text-blue-400/80" />
-              Activity Logs for {selectedUser?.name}
-            </DialogTitle>
-            <p className="text-slate-400 text-sm mt-1">{selectedUser?.email}</p>
-            <p className="text-xs text-blue-400/80 mt-1">Showing {selectedUserLogs.length} logs for this user</p>
+        <DialogContent className="bg-white max-w-2xl max-h-[82vh] flex flex-col" aria-describedby="logs-desc">
+          <DialogHeader className="shrink-0">
+            <DialogTitle className="text-gray-900 flex items-center gap-2"><FileText className="h-5 w-5 text-blue-600"/>Logs — {selectedUser?.name}</DialogTitle>
+            <p id="logs-desc" className="text-sm text-gray-500">{selectedUser?.email} · {selectedUserLogs.length} records</p>
           </DialogHeader>
-          
-          <div className="space-y-4 mt-4 pr-2">
-            {selectedUserLogs.map((log) => (
-              <div key={log.id} className="bg-slate-800/30 rounded-xl border border-slate-700/50 p-5 hover:bg-slate-800/40 transition-all backdrop-blur-sm">
-                <div className="flex items-center gap-2 mb-3">
-                  {getLogLevelBadge(log.level)}
-                  <span className="text-sm text-slate-400">
-                    {new Date(log.timestamp).toLocaleString()}
-                  </span>
+          <div className="flex-1 overflow-y-auto mt-3 space-y-2 min-h-0">
+            {selectedUserLogs.length===0?(
+              <div className="py-12 text-center"><FileText className="h-10 w-10 text-gray-300 mx-auto mb-3"/><p className="text-gray-500">No activity logs found.</p></div>
+            ):selectedUserLogs.map(log=>(
+              <div key={log.id} className={`p-3 rounded-lg border ${log.level==='error'?'bg-red-50 border-red-100':log.level==='warning'?'bg-amber-50 border-amber-100':'bg-gray-50 border-gray-100'}`}>
+                <div className="flex items-center gap-2 mb-1">
+                  <Badge className={`text-xs ${log.level==='error'?'bg-red-600 text-white':log.level==='warning'?'bg-amber-500 text-white':'bg-blue-600 text-white'}`}>{log.level}</Badge>
+                  <span className="text-xs text-gray-400">{new Date(log.timestamp).toLocaleString()}</span>
                 </div>
-                <p className="text-slate-200 font-medium text-base">{log.action}</p>
-                {log.page && (
-                  <p className="text-sm text-slate-400 mt-2">Page: {log.page}</p>
-                )}
-                {log.details && (
-                  <div className="mt-3 p-3 bg-slate-800 rounded-lg border border-slate-700/50">
-                    <pre className="text-xs text-slate-300 whitespace-pre-wrap font-mono">
-                      {JSON.stringify(log.details, null, 2)}
-                    </pre>
-                  </div>
-                )}
+                <p className="text-sm text-gray-800 font-medium">{log.action}</p>
+                {log.page&&<p className="text-xs text-gray-400 mt-0.5">Page: {log.page}</p>}
               </div>
             ))}
+          </div>
+          <div className="shrink-0 pt-4 border-t border-gray-100 mt-4">
+            <Button className="w-full bg-gray-900 hover:bg-gray-800 text-white h-10" onClick={()=>setShowLogsModal(false)}>Close</Button>
           </div>
         </DialogContent>
       </Dialog>

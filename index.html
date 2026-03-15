@@ -1,21 +1,27 @@
-
 <!doctype html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>CareDose+ - Smart Medication Management</title>
-    <meta name="description" content="Professional medication management system for healthcare providers to track patient medications, appointments, and adherence" />
-    <meta name="author" content="CareDose+" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="CareDose+" />
+    <meta name="theme-color" content="#0d9488" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#134e4a" media="(prefers-color-scheme: dark)" />
+    <meta name="description" content="CareDose+ — Smart medication management for elderly care." />
+    <meta name="format-detection" content="telephone=yes" />
 
-    <meta property="og:title" content="CareDose+ - Smart Medication Management" />
-    <meta property="og:description" content="Professional medication management system for healthcare providers" />
-    <meta property="og:type" content="website" />
+    <!-- PWA -->
+    <link rel="manifest" href="/manifest.json" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/icons/icon-192.png" />
 
-    <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:site" content="@caredose" />
+    <!-- Preconnect for performance -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+
+    <title>CareDose+ | Smart Medication Management</title>
   </head>
-
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
