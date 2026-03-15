@@ -75,6 +75,8 @@ const DoctorApp = () => {
   const [videoPatient, setVideoPatient] = useState<Patient|null>(null);
   const [videoAppointmentId, setVideoAppointmentId] = useState<string|undefined>();
   const [stats, setStats] = useState({ totalPatients:0, todayApts:0, activePrescriptions:0, emergencies:0, completedToday:0 });
+  // Map patientId -> their current prescriptions (for patient card display)
+  const [patientPrescriptions, setPatientPrescriptions] = useState<Record<string, Prescription[]>>({});
   const unsubRef = useRef<(()=>void)[]>([]);
   const navigate = useNavigate();
   const today = new Date().toISOString().split('T')[0];
@@ -141,8 +143,13 @@ const DoctorApp = () => {
       setStats(p=>({...p, todayApts:apts.filter(a=>a.date===today&&a.status==='scheduled').length, completedToday:apts.filter(a=>a.date===today&&a.status==='completed').length}));
     });
     const u3 = onSnapshot(query(collection(db,'prescriptions'), where('doctorId','==',uid), where('status','==','active')), snap => {
-      setPrescriptions(snap.docs.map(d=>({id:d.id,...d.data()})) as Prescription[]);
-      setStats(p=>({...p, activePrescriptions:snap.size}));
+      const rxs = snap.docs.map(d=>({id:d.id,...d.data()})) as Prescription[];
+      setPrescriptions(rxs);
+      setStats(p=>({...p, activePrescriptions:rxs.length}));
+      // Group by patient for card display
+      const byPatient: Record<string,Prescription[]> = {};
+      rxs.forEach(rx => { if (!byPatient[rx.patientId]) byPatient[rx.patientId]=[]; byPatient[rx.patientId].push(rx); });
+      setPatientPrescriptions(byPatient);
     });
     const u4 = onSnapshot(query(collection(db,'emergencies'), where('status','==','active')), snap => {
       setEmergencies(snap.docs.map(d=>({id:d.id,...d.data()})) as Emergency[]);
@@ -169,7 +176,31 @@ const DoctorApp = () => {
           totalQuantity:qty, currentQuantity:qty, createdAt:serverTimestamp()
         });
       }
-      await addDoc(collection(db,'notifications'), { userId:selectedPatient.id, type:'prescription', fromUserId:user.uid, fromUserName:profile?.name, message:`💊 Dr. ${profile?.name} has issued a new prescription for you.`, read:false, createdAt:serverTimestamp() });
+      // Notify patient
+      await addDoc(collection(db,'notifications'), {
+        userId:selectedPatient.id, type:'prescription', prescriptionId:rxRef.id,
+        fromUserId:user.uid, fromUserName:profile?.name, navigateTo:'/elderly',
+        message:`💊 Dr. ${profile?.name} has issued a new prescription for you (${rxMeds.filter(m=>m.name).map(m=>m.name).join(', ')}).`,
+        read:false, createdAt:serverTimestamp()
+      });
+      // Notify connected caregivers
+      try {
+        const conns = await getDocs(query(collection(db,'connections'), where('users','array-contains',selectedPatient.id), where('status','==','active')));
+        for (const cd of conns.docs) {
+          const conn = cd.data();
+          const cgId = conn.users?.find((id:string)=>id!==selectedPatient.id);
+          if (!cgId) continue;
+          const cgDoc = await getDoc(doc(db,'users',cgId));
+          if (cgDoc.data()?.role==='caregiver') {
+            await addDoc(collection(db,'notifications'), {
+              userId:cgId, type:'prescription', prescriptionId:rxRef.id,
+              fromUserId:user.uid, fromUserName:profile?.name, navigateTo:'/caregiver',
+              message:`💊 Dr. ${profile?.name} issued a prescription for ${selectedPatient.name}: ${rxMeds.filter(m=>m.name).map(m=>m.name).join(', ')}.`,
+              read:false, createdAt:serverTimestamp()
+            });
+          }
+        }
+      } catch {}
       if (rxNextAppt) {
         await addDoc(collection(db,'appointments'), { doctorId:user.uid, doctorName:profile?.name, patientId:selectedPatient.id, patientName:selectedPatient.name, date:rxNextAppt, time:'10:00', type:'follow-up', status:'scheduled', notes:'Follow-up after prescription', createdAt:serverTimestamp() });
         await addDoc(collection(db,'notifications'), { userId:selectedPatient.id, type:'appointment_booked', fromUserId:user.uid, fromUserName:profile?.name, message:`📅 Dr. ${profile?.name} scheduled a follow-up appointment on ${rxNextAppt} at 10:00 AM.`, read:false, createdAt:serverTimestamp() });
@@ -278,7 +309,7 @@ const DoctorApp = () => {
             <TabsTrigger value="patients">🧑‍⚕️ Patients ({patients.length})</TabsTrigger>
             <TabsTrigger value="calendar">📅 Calendar</TabsTrigger>
             <TabsTrigger value="appointments">🕐 Appointments ({appointments.filter(a=>a.status==='scheduled').length})</TabsTrigger>
-            <TabsTrigger value="prescriptions">💊 Prescriptions ({prescriptions.length})</TabsTrigger>
+  
             <TabsTrigger value="emergencies">🚨{emergencies.length>0?` (${emergencies.length})`:''}</TabsTrigger>
             <TabsTrigger value="profile">👤 Profile</TabsTrigger>
           </TabsList>
@@ -323,6 +354,20 @@ const DoctorApp = () => {
                         <div className="mb-3 space-y-1">
                           {p.allergies&&<p className="text-xs text-red-600 bg-red-50 px-2 py-1 rounded">⚠️ Allergies: {p.allergies}</p>}
                           {p.medicalConditions&&<p className="text-xs text-blue-700 bg-blue-50 px-2 py-1 rounded">🩺 {p.medicalConditions}</p>}
+                        </div>
+                      )}
+                      {/* Current prescriptions */}
+                      {patientPrescriptions[p.id]?.length > 0 && (
+                        <div className="mb-3">
+                          <p className="text-xs font-semibold text-purple-700 mb-1">💊 Current Medications</p>
+                          <div className="flex flex-wrap gap-1">
+                            {patientPrescriptions[p.id].flatMap(rx=>rx.medicines||[]).slice(0,4).map((m,i)=>(
+                              <span key={i} className="text-xs bg-purple-50 text-purple-700 border border-purple-200 px-2 py-0.5 rounded-full">{m.name} {m.dosage}</span>
+                            ))}
+                            {patientPrescriptions[p.id].flatMap(rx=>rx.medicines||[]).length > 4 && (
+                              <span className="text-xs text-gray-400">+{patientPrescriptions[p.id].flatMap(rx=>rx.medicines||[]).length - 4} more</span>
+                            )}
+                          </div>
                         </div>
                       )}
                       <div className="grid grid-cols-3 gap-2">
@@ -494,41 +539,6 @@ const DoctorApp = () => {
                       </>}
                     </div>
                   </div>
-                ))}
-              </div>
-            )}
-          </TabsContent>
-
-          {/* ── PRESCRIPTIONS ── */}
-          <TabsContent value="prescriptions" className="mt-4 space-y-3">
-            <div className="flex items-center justify-between">
-              <h2 className="text-base font-semibold text-gray-900">Active Prescriptions</h2>
-              {patients.length>0&&<Button className="bg-blue-600 hover:bg-blue-700 text-white h-9 px-4 text-sm" onClick={()=>{setSelectedPatient(patients[0]);setShowPrescriptionModal(true);}}><Plus className="h-4 w-4 mr-2"/>New Rx</Button>}
-            </div>
-            {prescriptions.length===0?(
-              <Card className="bg-white border border-gray-200"><CardContent className="py-12 text-center"><Pill className="h-12 w-12 text-gray-300 mx-auto mb-3"/><p className="text-gray-500">No active prescriptions</p></CardContent></Card>
-            ):(
-              <div className="space-y-3">
-                {prescriptions.map(rx=>(
-                  <Card key={rx.id} className="bg-white border border-gray-200 shadow-none">
-                    <CardContent className="p-5">
-                      <div className="flex items-start justify-between mb-3">
-                        <div><p className="font-semibold text-gray-900">{rx.patientName}</p><p className="text-xs text-gray-400">{rx.createdAt?.toDate?.()?.toLocaleDateString()||'Recently'} · {rx.totalDuration}</p></div>
-                        <Badge className="bg-emerald-100 text-emerald-700 text-xs">Active</Badge>
-                      </div>
-                      <div className="space-y-2">
-                        {(rx.medicines||[]).map((m,i)=>(
-                          <div key={i} className="flex items-center gap-3 p-2.5 bg-blue-50 border border-blue-100 rounded-lg">
-                            <Pill className="h-3.5 w-3.5 text-blue-600 shrink-0"/>
-                            <span className="font-medium text-gray-900 text-sm">{m.name}</span>
-                            <span className="text-gray-500 text-xs">{m.dosage}</span>
-                            <span className="text-xs text-gray-500 ml-auto">{m.frequency}</span>
-                          </div>
-                        ))}
-                      </div>
-                      {rx.generalNotes&&<p className="text-xs text-gray-500 mt-2 italic">{rx.generalNotes}</p>}
-                    </CardContent>
-                  </Card>
                 ))}
               </div>
             )}

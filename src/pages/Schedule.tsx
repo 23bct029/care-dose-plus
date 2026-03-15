@@ -33,9 +33,10 @@ const Schedule = () => {
       const q = query(collection(db, 'appointments'),
         where('patientId', '==', currentUser.uid));
       const snap = await getDocs(q);
-      const apps: any[] = snap.docs
-        .map(d => ({ id: d.id, ...d.data() }))
-        .sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+      interface AppItem { id: string; date: string; time: string; [key: string]: any; }
+      const apps: AppItem[] = (snap.docs
+        .map(d => ({ id: d.id, ...d.data() })) as AppItem[])
+        .sort((a, b) => ((a.date||'') + (a.time||'')).localeCompare((b.date||'') + (b.time||'')));
       setAppointments(apps);
 
       // Load connected doctors

@@ -17,6 +17,7 @@ interface A11ySettings {
 const DEFAULTS: A11ySettings = {
   fontSize: 100, highContrast: false, reducedAnimation: false,
   largeButtons: false, dyslexiaFont: false, darkMode: false, lineSpacing: false,
+  colorBlindMode: false, simplifiedUI: false,
 };
 
 const AccessibilityToolbar: React.FC = () => {

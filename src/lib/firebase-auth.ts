@@ -19,6 +19,16 @@ export interface UserProfile {
   isActive?: boolean;
   createdAt?: string;
   updatedAt?: string;
+  // Medical profile fields
+  bloodGroup?: string;
+  age?: number;
+  gender?: string;
+  address?: string;
+  medicalConditions?: string;
+  allergies?: string;
+  emergencyContact?: string;
+  profileCompleted?: boolean;
+  riskLevel?: 'low' | 'medium' | 'high';
 }
 
 // Get current user as Promise

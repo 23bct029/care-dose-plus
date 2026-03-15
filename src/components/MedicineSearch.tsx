@@ -27,7 +27,7 @@ const COMMON_MEDICINES = [
   'Vitamin D3','Calcium Carbonate','Multivitamin','Zinc','Magnesium',
 ];
 
-interface Suggestion { name: string; rxcui?: string; source: 'local' | 'rxnorm' }
+interface Suggestion { name: string; rxcui?: string; source: 'local' | 'rxnorm'; }
 
 const MedicineSearch = ({ value, onChange, placeholder = 'Search medicine name...', className = '' }: MedicineSearchProps) => {
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
@@ -48,7 +48,7 @@ const MedicineSearch = ({ value, onChange, placeholder = 'Search medicine name..
     if (!value || value.length < 2) { setSuggestions([]); setOpen(false); return; }
 
     // Instant local results
-    const local = COMMON_MEDICINES
+    const local: Suggestion[] = COMMON_MEDICINES
       .filter(m => m.toLowerCase().includes(value.toLowerCase()))
       .slice(0, 5)
       .map(m => ({ name: m, source: 'local' as const }));
@@ -82,7 +82,7 @@ const MedicineSearch = ({ value, onChange, placeholder = 'Search medicine name..
 
         const allNames = [...new Set([...apiSuggestions, ...approx])].slice(0, 8);
         const rxSuggestions = allNames.map(name => ({ name, source: 'rxnorm' as const }));
-        const merged = [...local];
+        const merged: Suggestion[] = [...local];
         rxSuggestions.forEach(s => { if (!merged.find(m => m.name.toLowerCase() === s.name.toLowerCase())) merged.push(s); });
         setSuggestions(merged.slice(0, 10));
         if (merged.length > 0) setOpen(true);

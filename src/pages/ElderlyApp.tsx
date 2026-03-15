@@ -56,6 +56,7 @@ const ElderlyApp = () => {
   const [medicines, setMedicines] = useState<Medicine[]>([]);
   const [nextDose, setNextDose] = useState<any>(null);
   const [caregivers, setCaregivers] = useState<Caregiver[]>([]);
+  const [doctors, setDoctors] = useState<{id:string;name:string;email:string;phone?:string}[]>([]);
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [adherenceRate, setAdherenceRate] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -326,6 +327,25 @@ const ElderlyApp = () => {
       if (!isMuted) speechService.speak('Great job! Medicine marked as taken. Stay healthy!');
       await logger.logWithUser(user.uid, user.email, 'info', 'Medicine taken', {medicineId, time});
       setTimeout(() => loadData(), 1000);
+    } catch(e) { console.error(e); }
+  };
+
+  const handleManualRestock = async (medicineId: string, addQty: number) => {
+    const med = medicines.find(m=>m.id===medicineId);
+    if (!med) return;
+    const newQty = (med.currentQuantity||0) + addQty;
+    try {
+      await updateDoc(doc(db,'medicines',medicineId), { currentQuantity:newQty, lastRestockedAt:serverTimestamp(), lastRestockedQty:addQty });
+      setMedicines(prev=>prev.map(m=>m.id===medicineId?{...m,currentQuantity:newQty}:m));
+      // Save notification for caregiver
+      if (user) {
+        await addDoc(collection(db,'notifications'), {
+          userId: user.uid, type:'restock_done', medicineId,
+          message:`✅ ${med.name} restocked — added ${addQty} tablets. New stock: ${newQty} tablets.`,
+          read:false, createdAt:serverTimestamp()
+        });
+      }
+      if (!isMuted) speechService.speak(`${med.name} restocked with ${addQty} tablets.`);
     } catch(e) { console.error(e); }
   };
 
@@ -710,7 +730,15 @@ const ElderlyApp = () => {
                                 {stockLow && <Badge className="bg-orange-500 text-white text-xs"><Package className="h-2.5 w-2.5 mr-1 inline" />Low Stock</Badge>}
                               </div>
                               <p className="text-sm text-gray-600 mt-0.5">{med.dosage}{med.foodTiming ? ` • ${med.foodTiming} food` : ''}</p>
-                              {med.currentQuantity != null && <p className="text-xs text-gray-400 mt-0.5">{med.currentQuantity} tablets remaining</p>}
+                              {med.currentQuantity != null && (
+                                <div className="flex items-center gap-2 mt-0.5">
+                                  <p className="text-xs text-gray-400">{med.currentQuantity} tablets remaining</p>
+                                  <button className="text-xs text-blue-600 hover:text-blue-700 underline"
+                                    onClick={()=>handleManualRestock(med.id, med.totalQuantity||30)}>
+                                    +Restock
+                                  </button>
+                                </div>
+                              )}
                             </div>
                             <div className="flex items-center gap-2 shrink-0">
                               <span className="text-sm font-bold text-gray-700 bg-gray-100 px-3 py-1 rounded-full">{time}</span>
@@ -901,6 +929,41 @@ const ElderlyApp = () => {
             {user && <SetupGuide userId={user.uid}/>}
           </TabsContent>
         </Tabs>
+
+        {/* Doctor Contacts */}
+        {doctors.length > 0 && (
+          <Card className="bg-white border border-gray-200 shadow-none">
+            <CardHeader className="pb-2 pt-4 px-4">
+              <CardTitle className="flex items-center gap-2 text-sm font-semibold text-blue-900">
+                <svg className="h-4 w-4 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+                My Doctors
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="px-4 pb-4">
+              <div className="space-y-2">
+                {doctors.map(dr=>(
+                  <div key={dr.id} className="flex items-center justify-between p-3 bg-blue-50 rounded-xl border border-blue-100">
+                    <div className="flex items-center gap-3">
+                      <div className="h-10 w-10 rounded-full bg-blue-600 flex items-center justify-center text-white font-bold text-sm shrink-0">{dr.name?.charAt(0)}</div>
+                      <div>
+                        <p className="font-semibold text-gray-900 text-sm">Dr. {dr.name}</p>
+                        <p className="text-xs text-gray-500">{dr.email}</p>
+                      </div>
+                    </div>
+                    <div className="flex gap-1.5">
+                      {dr.phone && (
+                        <Button size="sm" className="bg-blue-600 hover:bg-blue-700 text-white h-8 px-3 text-xs"
+                          onClick={()=>window.location.href=`tel:${dr.phone}`}>
+                          <Phone className="h-3.5 w-3.5 mr-1"/>Call
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Wearable Health Widget */}
         <WearableWidget userId={user?.uid||''} onFallDetected={()=>setShowEmergencyModal(true)} compact={true}/>

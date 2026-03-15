@@ -37,7 +37,7 @@
     overflow-x: hidden;
   }
 
-  /* ── TABS: Nuclear fix for shrunken appearance ──────────────── */
+  
   /* Target both radix role AND data attributes used by shadcn */
   [role="tablist"],
   [data-radix-collection-item],
@@ -119,6 +119,79 @@
 
   input, select, textarea {
     font-size: 0.875rem;
+  }
+
+  /* ── DEFINITIVE TAB FIX ─────────────────────────────────────
+     Radix UI Tabs renders role="tablist" and role="tab"
+     These styles OVERRIDE all component-level classes         */
+  [role="tablist"] {
+    display: flex !important;
+    flex-direction: row !important;
+    align-items: stretch !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    gap: 2px !important;
+    background: #f1f5f9 !important;
+    border-radius: 12px !important;
+    padding: 4px !important;
+    overflow-x: auto !important;
+    overflow-y: hidden !important;
+    scrollbar-width: none !important;
+    -ms-overflow-style: none !important;
+    box-sizing: border-box !important;
+  }
+  [role="tablist"]::-webkit-scrollbar { display: none !important; }
+
+  [role="tab"] {
+    flex: 1 1 0 !important;
+    min-width: 72px !important;
+    max-width: none !important;
+    width: auto !important;
+    height: auto !important;
+    min-height: 40px !important;
+    padding: 8px 12px !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 5px !important;
+    font-size: 0.8125rem !important;
+    font-weight: 500 !important;
+    line-height: 1.25 !important;
+    white-space: nowrap !important;
+    text-overflow: ellipsis !important;
+    color: #64748b !important;
+    background: transparent !important;
+    border: none !important;
+    border-radius: 8px !important;
+    cursor: pointer !important;
+    transition: background 0.12s, color 0.12s !important;
+    box-sizing: border-box !important;
+    outline: none !important;
+    text-align: center !important;
+    -webkit-appearance: none !important;
+    appearance: none !important;
+    position: relative !important;
+    overflow: visible !important;
+  }
+  [role="tab"]:hover:not([data-state="active"]):not([aria-selected="true"]) {
+    background: #e2e8f0 !important;
+    color: #1d4ed8 !important;
+  }
+  [role="tab"][data-state="active"],
+  [role="tab"][aria-selected="true"] {
+    background: #2563eb !important;
+    color: #ffffff !important;
+    font-weight: 600 !important;
+    box-shadow: 0 1px 4px rgba(37,99,235,0.3) !important;
+  }
+  [role="tab"][data-state="active"]:hover,
+  [role="tab"][aria-selected="true"]:hover {
+    background: #1d4ed8 !important;
+  }
+  [role="tabpanel"] {
+    width: 100% !important;
+    min-width: 0 !important;
+    outline: none !important;
   }
 
   *:focus-visible {

@@ -181,13 +181,32 @@ const AdminApp = () => {
             </div>
           </div>
 
-          {/* System Health */}
+          {/* System Health with signal bars */}
           <div className="px-6 py-4 border-b border-gray-700">
             <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">System Status</p>
-            {[['Database',systemHealth.database],['Auth',systemHealth.auth],['API',systemHealth.api]].map(([name,status])=>(
-              <div key={name} className="flex items-center justify-between mb-2">
-                <span className="text-sm text-gray-300">{name}</span>
-                <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${status==='healthy'?'bg-emerald-900 text-emerald-300':'bg-red-900 text-red-300'}`}>{status}</span>
+            {[
+              {name:'Database', status:systemHealth.database, icon:'🗄️'},
+              {name:'Auth',     status:systemHealth.auth,     icon:'🔐'},
+              {name:'API',      status:systemHealth.api,      icon:'🌐'},
+              {name:'Storage',  status:systemHealth.storage,  icon:'💾'},
+            ].map(({name,status,icon})=>(
+              <div key={name} className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm">{icon}</span>
+                  <span className="text-sm text-gray-300">{name}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  {/* Signal bars */}
+                  <div className="flex items-end gap-0.5 h-4">
+                    {[1,2,3,4].map(bar=>(
+                      <div key={bar} className={`w-1.5 rounded-sm transition-all ${status==='healthy'?'bg-emerald-400':bar<=2?'bg-red-400':'bg-gray-600'}`}
+                        style={{height:`${bar*4}px`}}/>
+                    ))}
+                  </div>
+                  <span className={`text-xs font-medium px-1.5 py-0.5 rounded ${status==='healthy'?'bg-emerald-900 text-emerald-300':'bg-red-900 text-red-300'}`}>
+                    {status==='healthy'?'OK':'!'}
+                  </span>
+                </div>
               </div>
             ))}
           </div>
@@ -445,7 +464,14 @@ const AdminApp = () => {
                       <CardContent className="p-5 text-center">
                         <div className={`h-14 w-14 ${s.bg} rounded-xl flex items-center justify-center mx-auto mb-3 ${s.color}`}>{s.icon}</div>
                         <p className="font-semibold text-gray-900">{s.name}</p>
-                        <Badge className={`mt-2 text-xs ${s.status==='healthy'?'bg-emerald-100 text-emerald-700':'bg-red-100 text-red-700'}`}>{s.status}</Badge>
+                        {/* Signal strength bars */}
+                        <div className="flex items-end justify-center gap-0.5 h-5 mt-2 mb-1">
+                          {[1,2,3,4].map(bar=>(
+                            <div key={bar} className={`w-2 rounded-sm ${s.status==='healthy'?'bg-emerald-500':bar<=2?'bg-red-500':'bg-gray-200'}`}
+                              style={{height:`${bar*5}px`}}/>
+                          ))}
+                        </div>
+                        <Badge className={`text-xs ${s.status==='healthy'?'bg-emerald-100 text-emerald-700':'bg-red-100 text-red-700'}`}>{s.status}</Badge>
                       </CardContent>
                     </Card>
                   ))}

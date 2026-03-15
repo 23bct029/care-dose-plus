@@ -9,18 +9,24 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src'),
     },
   },
+  server: {
+    host: '0.0.0.0',
+    port: parseInt(process.env.PORT || '5173'),
+    strictPort: false,
+  },
+  preview: {
+    host: '0.0.0.0',
+    port: parseInt(process.env.PORT || '4173'),
+    strictPort: false,
+  },
   build: {
-    // Increase warning limit to 1000kB (optional)
-    chunkSizeWarningLimit: 1000,
-    
-    // Manual chunk splitting for better performance
+    chunkSizeWarningLimit: 1500,
     rollupOptions: {
       output: {
         manualChunks: {
-          // Split vendor libraries into separate chunks
           'react-vendor': ['react', 'react-dom', 'react-router-dom'],
-          'firebase-vendor': ['firebase/app', 'firebase/auth', 'firebase/firestore', 'firebase/storage', 'firebase/functions'],
-          'ui-vendor': ['lucide-react', 'react-day-picker', 'clsx', 'tailwind-merge'],
+          'firebase-vendor': ['firebase/app', 'firebase/auth', 'firebase/firestore', 'firebase/storage'],
+          'ui-vendor': ['lucide-react', 'clsx', 'tailwind-merge'],
         },
       },
     },
