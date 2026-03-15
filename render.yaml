@@ -1,13 +1,9 @@
 services:
   - type: web
-    name: caredose-app
+    name: care-dose-plus
     env: static
     buildCommand: npm ci && npm run build
-    staticPublishPath: ./dist
-    headers:
-      - path: /*
-        name: Cache-Control
-        value: no-cache
+    staticPublishPath: dist
     routes:
       - type: rewrite
         source: /*
