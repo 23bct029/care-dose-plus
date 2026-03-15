@@ -851,7 +851,7 @@ const ElderlyApp = () => {
                     { cat: '📞 Calls', cmds: ['Call caregiver','Video call caregiver','Call doctor','Video call doctor','Call 911'] },
                     { cat: '🚨 Emergency', cmds: ['I fell down','Chest pain','SOS help me','I feel dizzy'] },
                     { cat: '📊 Health Info', cmds: ['My adherence rate','My wellness score','Blood pressure tips','Blood sugar tips','Water intake tip','Sleep tips'] },
-                    { cat: '💬 General', cmds: ['Hello','How are you?','What time is it?','What is today's date?','Tell me a joke','Thank you','Goodbye'] },
+                    { cat: "💬 General", cmds: ["Hello","How are you?","What time is it?","What is todays date?","Tell me a joke","Thank you","Goodbye"] },
                   ].map(({cat, cmds}) => (
                     <div key={cat}>
                       <p className="font-semibold text-gray-600 mb-1">{cat}</p>
