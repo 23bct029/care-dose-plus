@@ -1104,6 +1104,33 @@ const ElderlyApp = () => {
             onClick={() => setShowEmergencyModal(false)}>Cancel</Button>
         </DialogContent>
       </Dialog>
+
+      {/* ── INCOMING VIDEO CALL POPUP ── */}
+      {user && (
+        <IncomingCallPopup
+          currentUserId={user.uid}
+          currentUserName={profile?.name || ''}
+          onAccept={(call) => {
+            setAcceptedCallData(call);
+            setVideoDoctor({ id: call.doctorId, name: call.doctorName });
+            setShowVideoConsult(true);
+          }}
+        />
+      )}
+
+      {/* ── VIDEO CONSULT (outgoing or accepted) ── */}
+      {user && showVideoConsult && videoDoctor && (
+        <VideoConsult
+          open={showVideoConsult}
+          onClose={() => { setShowVideoConsult(false); setAcceptedCallData(null); setVideoDoctor(null); }}
+          doctorName={videoDoctor.name}
+          patientName={profile?.name || ''}
+          doctorId={acceptedCallData?.doctorId || videoDoctor.id}
+          patientId={user.uid}
+          appointmentId={acceptedCallData?.appointmentId}
+          role="patient"
+        />
+      )}
     </div>
   );
 };

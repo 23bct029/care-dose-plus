@@ -81,7 +81,7 @@ const VideoConsult = ({ open, onClose, doctorName, patientName, doctorId, patien
             </div>
             <div>
               <h3 className="text-xl font-bold text-white mb-2">
-                {role==='doctor' ? `Starting call with ${patientName}` : `Joining call with Dr. ${doctorName}`}
+                {role==='doctor' ? `Starting call with ${patientName}` : `Joining call with ${doctorName}`}
               </h3>
               <p className="text-gray-400 text-sm">No login required · Works in any browser</p>
               <p className="text-gray-500 text-xs mt-1">Camera and microphone will be requested</p>
@@ -95,8 +95,8 @@ const VideoConsult = ({ open, onClose, doctorName, patientName, doctorId, patien
                 <ExternalLink className="h-4 w-4 mr-2"/>Open in New Tab
               </Button>
             </div>
-            <Button variant="ghost" className="text-red-400 hover:text-red-300 hover:bg-gray-800" onClick={handleEnd}>
-              <PhoneOff className="h-4 w-4 mr-2"/>Decline
+            <Button variant="ghost" className="text-gray-500 hover:text-gray-300 hover:bg-gray-800 text-sm" onClick={handleEnd}>
+              Cancel
             </Button>
           </div>
         ) : (
