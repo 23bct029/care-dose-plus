@@ -72,6 +72,7 @@ const ElderlyApp = () => {
   const [isListening, setIsListening] = useState(false);
   const [voiceText, setVoiceText] = useState('');
   const [voiceReply, setVoiceReply] = useState('');
+  const [voiceInput, setVoiceInput] = useState('');
   const [voiceHistory, setVoiceHistory] = useState<{q:string;a:string}[]>([]);
   // Profile editing
   const [isEditingProfile, setIsEditingProfile] = useState(false);
@@ -426,18 +427,35 @@ const ElderlyApp = () => {
     setVoiceText('');
     setVoiceReply('');
     try {
-      if (!isMuted) await speechService.speak('How can I help you?');
+      // Don't speak first - it blocks the microphone on mobile
+      // Just show visual feedback and start listening immediately
       const text = await speechService.listenForResponse(8000);
       setIsListening(false);
-      if (!text || text==='timeout'||text==='error'||text==='not_supported') {
-        const msg = "I didn't catch that. Please try again or type your question.";
-        setVoiceReply(msg);
-        if (!isMuted) speechService.speak(msg);
+      if (!text || text === 'timeout' || text === 'error' || text === 'not_supported' || text === 'busy') {
+        const errorMsg = text === 'not_supported'
+          ? 'Voice not supported in this browser. Please type your question below.'
+          : text === 'permission_denied'
+          ? 'Microphone blocked. Please allow microphone access in your browser settings.'
+          : 'Please try again — speak clearly after pressing the button.';
+        setVoiceReply(errorMsg);
+        if (!isMuted && text !== 'not_supported') speechService.speak('Please try again and speak clearly.');
         return;
       }
       setVoiceText(text);
       await processVoiceInput(text);
-    } catch(e) { setIsListening(false); console.error(e); }
+    } catch(e) {
+      setIsListening(false);
+      setVoiceReply('Microphone error. Please check browser permissions and try again.');
+      console.error('Voice error:', e);
+    }
+  };
+
+  // Text input fallback for voice
+  const handleTextCommand = async (text: string) => {
+    if (!text.trim()) return;
+    setVoiceText(text.trim());
+    setVoiceReply('');
+    await processVoiceInput(text.trim());
   };
 
   const processVoiceInput = async (text: string) => {
@@ -697,19 +715,39 @@ const ElderlyApp = () => {
             {/* Quick command buttons */}
             <div className="flex flex-wrap gap-2 mb-3">
               {[
-                { label:'Next Medicine', cmd:'What is my next medicine?' },
-                { label:'Appointments', cmd:'Show my appointments' },
-                { label:'Adherence', cmd:'What is my adherence rate?' },
-                { label:'Mark Taken', cmd:'Mark medicine as taken' },
-                { label:'Call Caregiver', cmd:'Call caregiver' },
-                { label:'Help', cmd:'Help' },
+                { label:'💊 Next Dose', cmd:'What is my next medicine?' },
+                { label:'📅 Appointments', cmd:'Show my appointments' },
+                { label:'📊 Adherence', cmd:'What is my adherence rate?' },
+                { label:'✅ Mark Taken', cmd:'Mark medicine as taken' },
+                { label:'📞 Call Caregiver', cmd:'Call caregiver' },
+                { label:'🏥 My Medicines', cmd:'List all my medicines' },
+                { label:'📦 Refill Alert', cmd:'Check refill status' },
+                { label:'❓ Help', cmd:'Help' },
               ].map(({label, cmd}) => (
                 <button key={label}
-                  className="text-xs bg-white border border-indigo-200 text-indigo-700 px-3 py-1.5 rounded-full hover:bg-indigo-100 transition-colors font-medium"
-                  onClick={() => { setVoiceText(cmd); processVoiceInput(cmd); }}>
+                  className="text-xs bg-white border border-indigo-200 text-indigo-700 px-3 py-1.5 rounded-full hover:bg-indigo-50 transition-colors font-medium shadow-sm"
+                  onClick={() => { setVoiceText(cmd); setVoiceInput(''); processVoiceInput(cmd); }}>
                   {label}
                 </button>
               ))}
+            </div>
+
+            {/* Text input fallback */}
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={voiceInput}
+                onChange={e => setVoiceInput(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter' && voiceInput.trim()) { handleTextCommand(voiceInput); setVoiceInput(''); } }}
+                placeholder="Or type your question here…"
+                className="flex-1 text-sm border border-indigo-200 rounded-lg px-3 py-2 bg-white focus:outline-none focus:border-indigo-400 focus:ring-1 focus:ring-indigo-300"
+              />
+              <button
+                onClick={() => { if (voiceInput.trim()) { handleTextCommand(voiceInput); setVoiceInput(''); } }}
+                className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+              >
+                Ask
+              </button>
             </div>
 
             {/* Current conversation */}

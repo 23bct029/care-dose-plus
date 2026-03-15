@@ -24,6 +24,12 @@ const RootRedirect = () => {
   const [dest, setDest] = useState<string | null>(null);
 
   useEffect(() => {
+    // Handle 404.html redirect (SPA fallback for Render)
+    const params = new URLSearchParams(window.location.search);
+    const redirectPath = params.get('redirect');
+    if (redirectPath && redirectPath !== '/') {
+      window.history.replaceState(null, '', decodeURIComponent(redirectPath));
+    }
     const unsub = onAuthStateChange(async (user) => {
       unsub();
       if (!user) { setDest('/login'); return; }
@@ -32,7 +38,14 @@ const RootRedirect = () => {
       const routes: Record<string, string> = {
         elderly: '/elderly', caregiver: '/caregiver', doctor: '/doctor', admin: '/admin'
       };
-      setDest(routes[profile.role] || '/elderly');
+      // If we were redirected to a specific path, use that
+      const currentPath = window.location.pathname;
+      const allowedPaths = ['/elderly','/caregiver','/doctor','/admin','/schedule','/medicines','/connections'];
+      if (allowedPaths.some(p => currentPath.startsWith(p))) {
+        setDest(currentPath);
+      } else {
+        setDest(routes[profile.role] || '/elderly');
+      }
     });
   }, []);
 
